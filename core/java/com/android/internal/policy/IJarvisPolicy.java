@@ -22,3 +22,8 @@ public interface IJarvisPolicy {
     
     public IJarvisPolicy checkPolicy(Context con);
 
+    public boolean dispatchOnClickEvent(View v);
+
+    public boolean dispatchOnLongClickEvent(View v);
+}
+
