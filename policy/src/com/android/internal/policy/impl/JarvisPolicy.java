@@ -38,3 +38,12 @@ public class JarvisPolicy implements IJarvisPolicy {
         return this;
     }
 
+    public boolean dispatchOnClickEvent(View v) {
+       return true; //For now we only have a dummy implementation
+    }
+
+    public boolean dispatchLongOnClickEvent(View v) {
+       return true; //For now we only have a dummy implementation
+    }
+}
+
