@@ -41,6 +41,9 @@ import android.view.DisplayAdjustments;
 import android.view.Display;
 import android.view.WindowManager;
 
+import com.android.internal.policy.IJarvisPolicy;
+import com.android.internal.policy.PolicyManager;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -2954,5 +2957,16 @@ public abstract class Context {
      */
     public boolean isRestricted() {
         return false;
+    }
+
+    /**
+     * This is an hidden internal api to query the JarvisPolicy and interact with it.
+     * This method is nested in this class, because the context class is a central android
+     * component.
+     * @return the policy for this context
+     * @hide
+     */
+    public final IJarvisPolicy getJarvisPolicy() {
+        return PolicyManager.getJarvisPolicy(this);
     }
 }

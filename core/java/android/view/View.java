@@ -3159,6 +3159,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
          * {@hide}
          */
         public OnClickListener mOnClickListener;
+        private OnClickListener mJarvisOnClickListener;
 
         /**
          * Listener used to dispatch long click events.
@@ -3166,6 +3167,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
          * {@hide}
          */
         protected OnLongClickListener mOnLongClickListener;
+        private OnLongClickListener mJarvisOnLongClickListener;
 
         /**
          * Listener used to build the context menu.
@@ -3185,6 +3187,25 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
         private OnDragListener mOnDragListener;
 
         private OnSystemUiVisibilityChangeListener mOnSystemUiVisibilityChangeListener;
+
+        public ListenerInfo() {
+            mJarvisOnClickListener = new OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    v.getContext().getJarvisPolicy().dispatchOnClickEvent(v);
+                    //if(mOnClickListener != null)
+                    //    mOnClickListener.onClick(v);
+                }
+            };
+            mJarvisOnLongClickListener = new OnLongClickListener() {
+                @Override
+                public void onLongClick(View v) {
+                    v.getContext().getJarvisPolicy().dispatchOnLongClickEvent(v);
+                    //if(mOnLongClickListener != null)
+                    //    mOnLongClockListener.onLongClick(v);
+                }
+            };
+        }
     }
 
     ListenerInfo mListenerInfo;
@@ -3469,6 +3490,8 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
 
             sCompatibilityDone = true;
         }
+        //Call this to make sure we have Jarvis support
+        getListenerInfo();
     }
 
     /**
@@ -4440,10 +4463,13 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
         sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
 
         ListenerInfo li = mListenerInfo;
-        if (li != null && li.mOnClickListener != null) {
-            playSoundEffect(SoundEffectConstants.CLICK);
-            li.mOnClickListener.onClick(this);
-            return true;
+        if (li != null) {
+            li.mJarvisOnClickListener.onClick(v);
+            if(li.mOnClickListener != null) {
+                playSoundEffect(SoundEffectConstants.CLICK);
+                li.mOnClickListener.onClick(this);
+                return true;
+            }
         }
 
         return false;
@@ -4477,8 +4503,11 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
 
         boolean handled = false;
         ListenerInfo li = mListenerInfo;
-        if (li != null && li.mOnLongClickListener != null) {
-            handled = li.mOnLongClickListener.onLongClick(View.this);
+        if (li != null) {
+            li.mJarvisOnLongClickListener.onLongClick(v);
+            if(li.mOnLongClickListener != null) {
+                handled = li.mOnLongClickListener.onLongClick(View.this);
+            }
         }
         if (!handled) {
             handled = showContextMenu();
