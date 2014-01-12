@@ -22,6 +22,7 @@ import android.view.LayoutInflater;
 import android.view.Window;
 import android.view.WindowManagerPolicy;
 
+import com.android.internal.os.IDeviceHandler;
 /**
  * {@hide}
  */
@@ -29,8 +30,11 @@ import android.view.WindowManagerPolicy;
 public final class PolicyManager {
     private static final String POLICY_IMPL_CLASS_NAME =
         "com.android.internal.policy.impl.Policy";
+    private static final String JARVIS_POLICY_IMPL_CLASS_NAME =
+        "com.android.internal.policy.impl.JarvisPolicy";
 
     private static final IPolicy sPolicy;
+    private static final IJarvisPolicy sJarvis;
 
     static {
         // Pull in the actual implementation of the policy at run-time
@@ -47,10 +51,30 @@ public final class PolicyManager {
             throw new RuntimeException(
                     POLICY_IMPL_CLASS_NAME + " could not be instantiated", ex);
         }
+        
+        //Now pull actual jarvis implementation at run-time
+        try {
+            Class policyClass = Class.forName(JARVIS_POLICY_IMPL_CLASS_NAME);
+            sJarvis = (IJarvisPolicy)policyClass.newInstance();
+        } catch (ClassNotFoundException ex) {
+            throw new RuntimeException(
+                    JARVIS_POLICY_IMPL_CLASS_NAME + " could not be loaded", ex);
+        } catch (InstantiationException ex) {
+            throw new RuntimeException(
+                    JARVIS_POLICY_IMPL_CLASS_NAME + " could not be instantiated", ex);
+        } catch (IllegalAccessException ex) {
+            throw new RuntimeException(
+                    JARVIS_POLICY_IMPL_CLASS_NAME + " could not be instantiated", ex);
+        }
     }
 
     // Cannot instantiate this class
     private PolicyManager() {}
+    
+    //This is the only way to access jarvis
+    public static IJarvisPolicy getJarvisPolicy(Context con) {
+        return sJarvis.checkPolicy(con);
+    }
 
     // The static methods to spawn new policy-specific objects
     public static Window makeNewWindow(Context context) {
@@ -61,11 +85,12 @@ public final class PolicyManager {
         return sPolicy.makeNewLayoutInflater(context);
     }
 
-    public static WindowManagerPolicy makeNewWindowManager() {
-        return sPolicy.makeNewWindowManager();
+    public static WindowManagerPolicy makeNewWindowManager(IDeviceHandler device) {
+        return sPolicy.makeNewWindowManager(device);
     }
 
     public static FallbackEventHandler makeNewFallbackEventHandler(Context context) {
         return sPolicy.makeNewFallbackEventHandler(context);
     }
 }
+
