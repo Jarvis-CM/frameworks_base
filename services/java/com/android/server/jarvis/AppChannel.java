@@ -21,6 +21,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
@@ -35,6 +36,7 @@ public class AppChannel {
     public static final int BUMP_UPDATE_WORDS  = 1;
     public static final int BUMP_LISTEN        = 2;
     public static final int BUMP_STOP          = 3;
+    public static final int BUMP_ACTION_QUERIED= 4;
     
     private ServiceConnection mConnection = new ServiceConnection() {
         // Called when the connection with the service is established
@@ -164,6 +166,10 @@ public class AppChannel {
         
         public void stop(int fortime) {
             mHandler.sendMessage(mHandler.obtainMessage(BUMP_STOP, new Integer(fortime)));
+        }
+
+        public void queryAction(int action, Bundle data) {
+            mHandler.sendMessage(mHandler.obtainMessage(BUMP_ACTION_QUERIED, action, 0, data));
         }
     };
 }

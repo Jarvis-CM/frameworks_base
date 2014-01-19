@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import com.android.internal.policy.*;
 import com.android.server.jarvis.GrammarRecognizer.GrammarMap;
@@ -51,6 +52,8 @@ import android.os.SystemClock;
 import android.os.Vibrator;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
+import android.speech.jarvis.JarvisConstants;
+import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -156,19 +159,25 @@ public class JarvisService {
                 log("Failed to parse result of recognizing.", ex);
             }
             if(mListenEx) {
-                listen();
+                listen(false);
             }
         }
         
         @Override
         public void onRecognitionFailure() {
             mStoppedListening = true;
+            if(mListenEx) {
+                listen(false);
+            }
         }
         
         @Override
         public void onRecognitionError(String reason) {
             mStoppedListening = true;
             log("Failed to recognize because of: " + reason);
+            if(mListenEx) {
+                listen(false);
+            }
         }
     };
     
@@ -193,7 +202,7 @@ public class JarvisService {
                     Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_SHAKE_THRESHOLD, SHAKE_THRESHOLD);
             mOnShakeListen = mShakeThreshold > 0; 
             mListenMode =
-                    Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_WAKE_UP, 0);
+                    Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_WAKE_UP, 3);
             mListenSOn = (mListenMode & 1) == 1;
             mListenP = (mListenMode & 2) == 2;
             mListenEverytime = (mListenMode & 4) == 4;
@@ -230,7 +239,7 @@ public class JarvisService {
     private Thread mVolumeThread;
     private boolean mVolume;
     private GrammarMap mGrammar;
-    private final Handler mMainHandler;
+    private Handler mMainHandler;
     private Vibrator mVibrator;
     
     //Now the specifi settings
@@ -243,6 +252,8 @@ public class JarvisService {
     private int mAmplitudeThreshold;
     private long mLastChange;
     private SharedPreferences mPreferences;
+    private ActionProvider mAProvider;
+    private boolean mReady;
 
     private static final void log(String s) {
         if(DEBUG)
@@ -258,7 +269,7 @@ public class JarvisService {
         mContext = con;
         mStoppedListening = true;
         mChannel = null;
-        mMainHandler = new JarvisHandler(wmHandler.getLooper(), this);
+        mMainHandler = null;
         mGrammar = new GrammarMap();
         try {
             mRecognizer = new GrammarRecognizer(con);
@@ -268,18 +279,8 @@ public class JarvisService {
         }
         log("Created Jarvis Service");
         mListenEx = false;
-        mMainThread = new Thread(new Runnable(){
-
-            @Override
-            public void run() {
-                try {
-                    Thread.sleep(30);
-                } catch (InterruptedException ex) {
-                    log("Failed while boot waiting.", ex);
-                }
-                prepare();
-            }
-        });
+        mMainThread = new WorkerThread("JarvisServiceThread");
+        mAProvider = new ActionProvider(con, this);
         
         //Init the settings:
         mOnShakeListen = true;
@@ -292,6 +293,7 @@ public class JarvisService {
         mAmplitudeThreshold = AMPLITUDE_THRESHOLD;
         mPreferences = mContext.getSharedPreferences(DEFAULT_NAME, 0);
         mLastChange = mPreferences.getLong("last_checked_words", -1);
+        mReady = false;
     }
     
     /**
@@ -308,22 +310,16 @@ public class JarvisService {
      *
      */
     private void startVolumeThread() {
+        if(mVolumeThread != null)
+            stopVolumeThread();
         mVolume = true;
         mVolumeThread = new Thread(new Runnable() {
             @Override
             public void run() {
-                while(mVolume) {
-                    try {
-                        Thread.sleep(25);
-                    } catch (InterruptedException ex) {
-                        ex.printStackTrace();
-                    }
+                while(mVolume && !Thread.interrupted()) {
                     if(mSMeter.getAmplitude() > mAmplitudeThreshold) {
                         log("Volume was higher then: " + mAmplitudeThreshold + " it was :" + mSMeter.getAmplitude());
-                        if(mStoppedListening)
-                            listen();
-                    } else if (!mStoppedListening) {
-                        stop();
+                        listen(true);
                     }
                 }
             }
@@ -352,7 +348,7 @@ public class JarvisService {
                 newService = true;
                 try {
                     mChannel.disconnect();
-                } catch (RemoteException ex) {
+                } catch (Exception ex) {
                     log("Failed to disconnect from service.",ex);
                 }
                 mChannel = null;
@@ -377,6 +373,7 @@ public class JarvisService {
         //Look for settings changes
         mObserver = new SettingsObserver(mMainHandler);
         mObserver.observe();
+        mObserver.onChange(false);
         
         //Used for detection
         mAccelerometer = ((SensorManager)mContext.getSystemService(Context.SENSOR_SERVICE)).getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
@@ -502,6 +499,7 @@ public class JarvisService {
         mContext.registerReceiver(mReceiver, filter);
 
         mSMeter = new SoundMeter();
+        mReady = true;
         onScreenOn();
         return true;
     }
@@ -579,22 +577,41 @@ public class JarvisService {
     /**
      * Call this to start listening. When the listening is not 
      * finished yet this will do nothing.
+     * @param If we should vibrate to send feedback
      */
-    private synchronized void listen() {
-        if(mStoppedListening) {
-            mVibrator.vibrate(200);
+    private synchronized void listen(boolean v) {
+        if(mStoppedListening && mReady) {
+            if(v)mVibrator.vibrate(200);
             mStoppedListening = false;
-            if(ENABLE_TOAST)Toast.makeText(mContext, "Start Recognizing", Toast.LENGTH_SHORT);
             mRecognizer.recognize();
         }
+    }
+    
+    private synchronized void listen() {
+        listen(true);
     }
 
     /**
      * Call this to interrupt listening. If the service doesn't listen, it does nothing.
      */
     private synchronized void stop() {
-        if(!mStoppedListening) {
+        if(!mStoppedListening && mReady) {
             mRecognizer.stop();
+        }
+    }
+    
+    /**
+     * When we receive a query from the service
+     */
+    private void queryAction(final int action, Bundle data) {
+        try {
+            switch(action) {
+                case JarvisConstants.TOGGLE_LAST_APP:
+                    mAProvider.toggleLastApp();
+                    break;
+            }
+        } catch (Throwable t) {
+            log("Failed to execute action " + action, t);
         }
     }
     
@@ -607,7 +624,7 @@ public class JarvisService {
          List<ResolveInfo> list = mContext.getPackageManager().queryIntentServices(intent, 0);
          return list.size() > 0;
     }
-    
+
     /**
      * Check if the given package is installed or not.
      * @param uri the package uri
@@ -621,8 +638,8 @@ public class JarvisService {
             return false;
         }
         return true;
-     }
-    
+    }
+
     private void enableListenEverytime(boolean t) {
         mListenEx = t;
         listen();
@@ -631,10 +648,15 @@ public class JarvisService {
     //Events that can occur
     
     private void onScreenOff() {
-        if(mListenSOn && !((isCharging && mListenP) || mListenEverytime))
+        if(mListenP && isCharging) {
+            enableListenEverytime(true);
+        } else if (mListenEverytime) {
+            enableListenEverytime(true);
+        } else if(mListenSOn) {
             enableListenEverytime(false);
-        if(mOnShakeListen && !isCharging)
-            enableShakeListener(false);
+        }
+        if(mOnShakeListen)
+            enableShakeListener(isCharging);
     }
 
     private void onScreenOn() {
@@ -658,6 +680,8 @@ public class JarvisService {
         if (mListenP) {
             enableListenEverytime(true);
         }
+        if(mOnShakeListen)
+            enableShakeListener(true);
     }
 
     private void onShake() {
@@ -676,7 +700,7 @@ public class JarvisService {
 
     public static boolean wasScreenOn = true;
     public static boolean isCharging = false;
-    
+
     public class SettingsReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -695,7 +719,7 @@ public class JarvisService {
             }
         }
     }
-    
+
     /**
      * handler for Jarvis. Used for AppChannel conection
      */
@@ -705,7 +729,7 @@ public class JarvisService {
             super(looper, null, true /*async*/);
             mService = s;
         }
-        
+
         @Override 
         public void handleMessage(Message msg) {
             switch (msg.what) {
@@ -713,14 +737,45 @@ public class JarvisService {
                     mService.lookForUpdate(mService.getBase());
                     break;
                 case AppChannel.BUMP_LISTEN:
-                    mService.listen();
+                    mService.listen(false);
                     break;
                 case AppChannel.BUMP_STOP:
                     mService.stop();
                     break;
+                case AppChannel.BUMP_ACTION_QUERIED:
+                    try {
+                        mService.queryAction(msg.arg1, (Bundle)msg.obj);
+                    } catch (Exception ex) {
+                        log("");
+                    }
+                    break;
                 default:
                     super.handleMessage(msg);
             }
+        }
+    }
+
+    private final class WorkerThread extends Thread {
+
+        private Handler mWorkerHandler;
+
+        public WorkerThread(String name) {
+            super(name);
+        }
+
+        @Override
+        public void run() {
+            Looper.prepare();
+            mWorkerHandler = new Handler();
+            mWorkerHandler.post(new Runnable(){
+                @Override
+                public void run() {
+                    new JarvisHandler(mWorkerHandler.getLooper(), JarvisService.this);
+                    prepare();
+                }
+            });
+            Log.i(TAG, "Prepared Looper for Jarvis Service");
+            Looper.loop();
         }
     }
 }

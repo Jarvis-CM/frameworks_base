@@ -17,7 +17,7 @@
 package android.speech.jarvis;
 
 import java.util.List;
-import android.speech.jarvis.JarvisWord;
+import android.os.Bundle;
 
 /** oneway service interface */
 oneway interface IJarvisCallback {
@@ -27,4 +27,6 @@ oneway interface IJarvisCallback {
     void listen(int fortime);
     
     void stop(int fortime);
+
+    void queryAction(int action, in Bundle data);
 }
