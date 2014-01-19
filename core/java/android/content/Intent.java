@@ -1293,6 +1293,11 @@ public class Intent implements Parcelable, Cloneable {
             "android.intent.action.MANAGE_NETWORK_USAGE";
 
     /**
+     * Service Action: A Service that can run as a Jarvis Service.
+     */
+    public static final String ACTION_JARVIS_VOICE_CONTROL = "android.intent.action.JARVIS_VOICE_CONTROL";
+
+    /**
      * Activity Action: Launch application installer.
      * <p>
      * Input: The data must be a content: or file: URI at which the application

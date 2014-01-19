@@ -74,6 +74,10 @@ public class Build {
 
     /** A hardware serial number, if available.  Alphanumeric only, case-insensitive. */ 
     public static final String SERIAL = getString("ro.serialno");
+
+    /** The supported Jarvis Voice Control version */
+    public static final int JARVIS_VERSION = SystemProperties.getInt(
+            "ro.build.jarvis.version", 0);
   
     /** Various version strings. */
     public static class VERSION {

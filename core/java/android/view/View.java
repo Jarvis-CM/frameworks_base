@@ -3199,10 +3199,11 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
             };
             mJarvisOnLongClickListener = new OnLongClickListener() {
                 @Override
-                public void onLongClick(View v) {
+                public boolean onLongClick(View v) {
                     v.getContext().getJarvisPolicy().dispatchOnLongClickEvent(v);
                     //if(mOnLongClickListener != null)
                     //    mOnLongClockListener.onLongClick(v);
+                    return false;//Does nothing
                 }
             };
         }
@@ -4464,7 +4465,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
 
         ListenerInfo li = mListenerInfo;
         if (li != null) {
-            li.mJarvisOnClickListener.onClick(v);
+            li.mJarvisOnClickListener.onClick(this);
             if(li.mOnClickListener != null) {
                 playSoundEffect(SoundEffectConstants.CLICK);
                 li.mOnClickListener.onClick(this);
@@ -4504,7 +4505,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
         boolean handled = false;
         ListenerInfo li = mListenerInfo;
         if (li != null) {
-            li.mJarvisOnLongClickListener.onLongClick(v);
+            li.mJarvisOnLongClickListener.onLongClick(this);
             if(li.mOnLongClickListener != null) {
                 handled = li.mOnLongClickListener.onLongClick(View.this);
             }

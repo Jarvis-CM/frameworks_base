@@ -16,7 +16,11 @@
 
 package com.android.internal.policy.impl;
 
+import java.lang.reflect.Method;
+
+import android.content.ComponentName;
 import android.content.Context;
+import android.view.View;
 
 import com.android.internal.policy.IJarvisPolicy;
 
@@ -29,21 +33,56 @@ import com.android.internal.policy.IJarvisPolicy;
 public class JarvisPolicy implements IJarvisPolicy {
     private static final String TAG = "JarvisPolicy";
 
+    private Object mJarvisService;
+
     public JarvisPolicy() {
-        
+        //TODO: Check for initialization stuff
     }
 
+    @Override
+    public boolean isConnected() {
+        return mJarvisService != null;
+    }
+
+    public void assignSystemService(Object o) {
+        try {
+            if(Class.forName("com.android.server.jarvis.JarvisService").isInstance(o))
+                mJarvisService = o;
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    @Override
     public IJarvisPolicy checkPolicy(Context con) {
         //TODO: Check for context and security..
         return this;
     }
 
+    @Override
     public boolean dispatchOnClickEvent(View v) {
        return true; //For now we only have a dummy implementation
     }
 
-    public boolean dispatchLongOnClickEvent(View v) {
+    @Override
+    public boolean dispatchOnLongClickEvent(View v) {
        return true; //For now we only have a dummy implementation
+    }
+
+    public ComponentName getConnectedServiceComponentName() {
+        //First check if it is even running
+        if(mJarvisService != null) {
+            try {
+                Method m = Class.forName("com.android.server.jarvis.JarvisService").getMethod("getServiceComponentName", null);
+                Object o = m.invoke(null, null);
+                if(o instanceof ComponentName) {
+                    return (ComponentName)o;
+                }
+            } catch (Exception ex) {
+                return null;
+            }
+        }
+        return null;
     }
 }
 

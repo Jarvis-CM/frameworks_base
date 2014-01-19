@@ -62,6 +62,7 @@ import com.android.server.display.DisplayManagerService;
 import com.android.server.dreams.DreamManagerService;
 import com.android.server.gesture.GestureService;
 import com.android.server.input.InputManagerService;
+import com.android.server.jarvis.JarvisService;
 import com.android.server.media.MediaRouterService;
 import com.android.server.net.NetworkPolicyManagerService;
 import com.android.server.net.NetworkStatsService;
@@ -203,6 +204,7 @@ class ServerThread {
         InputManagerService inputManager = null;
         TelephonyRegistry telephonyRegistry = null;
         ConsumerIrService consumerIr = null;
+        JarvisService jarvis = null;
 
         // Create a handler thread just for the window manager to enjoy.
         HandlerThread wmHandlerThread = new HandlerThread("WindowManager");
@@ -761,6 +763,13 @@ class ServerThread {
             }
 
             try {
+                Slog.i(TAG, "Jarvis Service");
+                jarvis = new JarvisService(context, wmHandler);
+            } catch (Throwable e) {
+                reportWtf("starting Jarvis Service", e);
+            }
+
+            try {
                 Slog.i(TAG, "UI Mode Manager Service");
                 // Listen for UI mode changes
                 uiMode = new UiModeManagerService(context, twilight);
@@ -1054,6 +1063,7 @@ class ServerThread {
         final TelephonyRegistry telephonyRegistryF = telephonyRegistry;
         final PrintManagerService printManagerF = printManager;
         final MediaRouterService mediaRouterF = mediaRouter;
+        final JarvisService jarvisService = jarvis;
 
         // We now tell the activity manager it is okay to run third party
         // code.  It will call back into us once it has gotten to the state
@@ -1211,6 +1221,11 @@ class ServerThread {
                     if (mediaRouterF != null) mediaRouterF.systemRunning();
                 } catch (Throwable e) {
                     reportWtf("Notifying MediaRouterService running", e);
+                }
+                try {
+                    if (jarvisService != null) jarvisService.systemReady();
+                } catch (Throwable e) {
+                    reportWtf("making Jarvis Service ready", e);
                 }
             }
         });

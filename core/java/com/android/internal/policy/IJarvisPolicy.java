@@ -16,14 +16,22 @@
 
 package com.android.internal.policy;
 
+import android.content.ComponentName;
 import android.content.Context;
+import android.view.View;
 
 public interface IJarvisPolicy {
-    
+
     public IJarvisPolicy checkPolicy(Context con);
 
     public boolean dispatchOnClickEvent(View v);
 
     public boolean dispatchOnLongClickEvent(View v);
+
+    public boolean isConnected();
+
+    public void assignSystemService(Object o);
+
+    public ComponentName getConnectedServiceComponentName();
 }
 

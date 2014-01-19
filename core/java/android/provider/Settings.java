@@ -3369,6 +3369,34 @@ public final class Settings {
         public static final String DOUBLE_TAP_SLEEP_GESTURE = "double_tap_sleep_gesture";
 
         /**
+         * The jarvis service component keys
+         * <package-name>;<service-name> or empty when not in use
+         * @hide
+         */
+        public static final String JARVIS_SERVICE_KEYS = "jarvis_service_keys";
+
+        /**
+         * To enable the shake threshold for jarvis service or -1 to disable
+         * @hide
+         */
+        public static final String JARVIS_SERVICE_SHAKE_THRESHOLD = "jarvis_shake_threshold";
+
+        /**
+         * To enable the wake up jarvis feature and it's modes
+         * 0 - disable
+         *
+         * Add the next ones together:
+         *
+         * 1 - enable when screen on
+         * 2 - enable when plugged in (so when the phone charges)
+         * 4 - enable everytime
+         *
+         * To enable all use 7 or only when screen on 1
+         * @hide
+         */
+        public static final String JARVIS_SERVICE_LISTEN_WAKE_UP = "jarvis_service_listen_wake_up";
+
+        /**
          * Settings to backup. This is here so that it's in the same place as the settings
          * keys and easy to update.
          *
