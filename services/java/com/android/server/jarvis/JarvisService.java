@@ -517,7 +517,7 @@ public class JarvisService {
         if(update) {//If we need an update add all words again
             mPreferences.edit().putLong("last_checked_words", last).commit();
             //Predefined words
-            mGrammar.addWord(DEFAULT_SLOT, DEFAULT_NAME, null, 1, "V='CallJarvis'");
+            mGrammar.addWord(DEFAULT_SLOT, DEFAULT_NAME, null, 1, "V='Jarvis'");
             mGrammar.addWord(DEFAULT_SLOT, "Okay", null, 1, "V='ok'");
             mGrammar.addWord(DEFAULT_SLOT, "Ok", null, 1, "V='ok'");
             mGrammar.addWord(DEFAULT_SLOT, "Okay " + DEFAULT_NAME, null, 1, "V='Jarvis'");
