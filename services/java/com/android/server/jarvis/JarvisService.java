@@ -517,10 +517,10 @@ public class JarvisService {
         if(update) {//If we need an update add all words again
             mPreferences.edit().putLong("last_checked_words", last).commit();
             //Predefined words
-            mGrammar.addWord(DEFAULT_SLOT, DEFAULT_NAME, null, 1, "V='Jarvis'");
+            mGrammar.addWord(DEFAULT_SLOT, DEFAULT_NAME, null, 1, "V='CallJarvis'");
             mGrammar.addWord(DEFAULT_SLOT, "Okay", null, 1, "V='ok'");
             mGrammar.addWord(DEFAULT_SLOT, "Ok", null, 1, "V='ok'");
-            mGrammar.addWord(DEFAULT_SLOT, "Okay " + DEFAULT_NAME, null, 1, "V='CallJarvis'");
+            mGrammar.addWord(DEFAULT_SLOT, "Okay " + DEFAULT_NAME, null, 1, "V='Jarvis'");
             log("Now fetching words from service.");
             final long start = SystemClock.uptimeMillis();
             num = 0;
@@ -601,7 +601,7 @@ public class JarvisService {
     }
     
     /**
-     * When we receive a query from the service
+     * When we receive a query from the service, here it get handled
      */
     private void queryAction(final int action, Bundle data) {
         try {
@@ -737,17 +737,15 @@ public class JarvisService {
                     mService.lookForUpdate(mService.getBase());
                     break;
                 case AppChannel.BUMP_LISTEN:
-                    mService.listen(false);
+                    boolean b = (msg.obj instanceof Boolean 
+                            && ((Boolean)msg.obj).booleanValue());
+                    mService.listen(b);
                     break;
                 case AppChannel.BUMP_STOP:
                     mService.stop();
                     break;
                 case AppChannel.BUMP_ACTION_QUERIED:
-                    try {
-                        mService.queryAction(msg.arg1, (Bundle)msg.obj);
-                    } catch (Exception ex) {
-                        log("");
-                    }
+                    mService.queryAction(msg.arg1, (Bundle)msg.obj);  
                     break;
                 default:
                     super.handleMessage(msg);

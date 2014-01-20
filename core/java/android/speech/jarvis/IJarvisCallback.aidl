@@ -24,9 +24,9 @@ oneway interface IJarvisCallback {
     
     void newWordsAvailable(long since);
     
-    void listen(int fortime);
+    void listen(long when, boolean continue);
     
-    void stop(int fortime);
+    void stop(long when);
 
     void queryAction(int action, in Bundle data);
 }

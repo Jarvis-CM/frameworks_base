@@ -26,6 +26,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.speech.jarvis.IJarvis;
 import android.speech.jarvis.IJarvisCallback;
 import android.util.Log;
@@ -160,12 +161,16 @@ public class AppChannel {
             mHandler.sendMessage(mHandler.obtainMessage(BUMP_UPDATE_WORDS, new Long(since)));
         }
         
-        public void listen(int fortime) {
-            mHandler.sendMessage(mHandler.obtainMessage(BUMP_LISTEN, new Integer(fortime)));
+        public void listen(long when, boolean b) {
+            if(when < SystemClock.uptimeMillis())
+                mHandler.sendMessage(mHandler.obtainMessage(BUMP_LISTEN, new Boolean(b)));
+            else mHandler.sendMessageAtTime(mHandler.obtainMessage(BUMP_LISTEN, new Boolean(b)), when);
         }
         
-        public void stop(int fortime) {
-            mHandler.sendMessage(mHandler.obtainMessage(BUMP_STOP, new Integer(fortime)));
+        public void stop(long when) {
+            if(when < SystemClock.uptimeMillis())
+                mHandler.sendMessage(mHandler.obtainMessage(BUMP_STOP, null));
+            else mHandler.sendMessageAtTime(mHandler.obtainMessage(BUMP_STOP, null), when);
         }
 
         public void queryAction(int action, Bundle data) {
