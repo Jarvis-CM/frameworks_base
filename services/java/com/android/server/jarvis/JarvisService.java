@@ -42,6 +42,8 @@ import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
+import android.os.IJarvisService;
 import android.os.Looper;
 import android.os.Message;
 import android.os.RemoteException;
@@ -62,7 +64,7 @@ import android.util.Log;
  * a bootloop so catch every Exception and Log them!
  * @author Firtecy
  */
-public class JarvisService {
+public class JarvisService extends IJarvisService.Stub {
     private static final boolean DEBUG = true;
     private static final String TAG = "JarvisService";
 
@@ -293,14 +295,17 @@ public class JarvisService {
     protected void moveToState(State s, Bundle data) {
         switch(s) {
             case DISABLED:
+                log("Moving to state disabled.");
                 enableListenEverytime(false);
                 enableShakeListener(false);
                 break;
             case IDLE:
+                log("Moving to state idle.");
                 enableListenEverytime(false);
                 enableShakeListener(true);
                 break;
             case LISTENING:
+                log("Moving to state listening");
                 enableListenEverytime(true);
                 enableShakeListener(true);
                 break;
@@ -321,6 +326,7 @@ public class JarvisService {
      * It will reset all settings
      */
     private void resetSettings() {
+        log("Resetting settings.");
         boolean newService = false;
         if(mChannel != null) {
             ComponentName c = mChannel.getComponentName();
@@ -352,14 +358,15 @@ public class JarvisService {
         if(!JarvisFileUtils.accessJarvisLocation())
             log("No write permission ot Jarvis Location");
         
+        //Used for detection
+        mAccelerometer = ((SensorManager)mContext.getSystemService(Context.SENSOR_SERVICE))
+                .getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        mVibrator = (Vibrator)mContext.getSystemService(Context.VIBRATOR_SERVICE);
+
         //Look for settings changes
         mObserver = new SettingsObserver(mMainHandler);
         mObserver.observe();
         mObserver.onChange(false);
-        
-        //Used for detection
-        mAccelerometer = ((SensorManager)mContext.getSystemService(Context.SENSOR_SERVICE)).getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        mVibrator = (Vibrator)mContext.getSystemService(Context.VIBRATOR_SERVICE);
         
         if(isAppInstalled(mServicePackage)) {
             //We have the support app installed so proceed
@@ -581,7 +588,21 @@ public class JarvisService {
             log("Failed to execute action " + action, t);
         }
     }
-    
+
+    //TODO: implement v
+    public boolean hasJarvisService() {
+         return true;
+    }
+
+    public int getStatus(int uid, String packageName, IBinder token) {
+        return 0;
+    }
+
+    public void doAction(int uid, String packageName, long code, Bundle data, IBinder token) {
+
+    }
+    //TODO: implement ^
+
     /**
      * Check if the given Intent is a callable service
      * @param intent the intent to check
@@ -607,12 +628,13 @@ public class JarvisService {
 
     private void enableListenEverytime(boolean t) {
         mState = State.LISTENING;
-        listen();
+        listen(false);
     }
     
     //Events that can occur
     
     private void onScreenOff() {
+        log("Turnend screen off.");
         if(mListenP && isCharging) {
             enableListenEverytime(true);
         } else if (mListenEverytime) {
@@ -625,6 +647,7 @@ public class JarvisService {
     }
 
     private void onScreenOn() {
+        log("Turnend screen on.");
         if(mListenSOn)
             enableListenEverytime(true);
         if(mOnShakeListen)
@@ -658,6 +681,7 @@ public class JarvisService {
     }
 
     private void setBlock(long till) {
+        log("Block queried till=" + till + " now we are at " + SystemClock.uptimeMillis());
         mBlockTill = till;
         if(till < SystemClock.uptimeMillis()) {
             //reapply current state so we can be sure that all values get applied
@@ -679,8 +703,10 @@ public class JarvisService {
         SensorManager sensorMgr = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
         //Remove the sensor listener if not needed, it will only keep the device active
         if(b && mOnShakeListen && mState != State.DISABLED) {
+            log("Trying to enable(" + b + ") ShakeListener -> register.");
             sensorMgr.registerListener(mShakeDetector, mAccelerometer, SensorManager.SENSOR_DELAY_NORMAL);
         } else if (!b) {
+            log("Trying to enable(" + b + ") ShakeListener -> unregister.");
             sensorMgr.unregisterListener(mShakeDetector);
         }
     }

@@ -765,6 +765,7 @@ class ServerThread {
             try {
                 Slog.i(TAG, "Jarvis Service");
                 jarvis = new JarvisService(context, wmHandler);
+                ServiceManager.addService("Jarvis", jarvis);
             } catch (Throwable e) {
                 reportWtf("starting Jarvis Service", e);
             }
