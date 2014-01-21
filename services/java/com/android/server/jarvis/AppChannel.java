@@ -34,10 +34,11 @@ import android.util.Log;
 public class AppChannel {
     private static final String TAG = "AppChannel";
     
-    public static final int BUMP_UPDATE_WORDS  = 1;
-    public static final int BUMP_LISTEN        = 2;
-    public static final int BUMP_STOP          = 3;
-    public static final int BUMP_ACTION_QUERIED= 4;
+    public static final int BUMP_UPDATE_WORDS   = 1;
+    public static final int BUMP_LISTEN         = 2;
+    public static final int BUMP_STOP           = 3;
+    public static final int BUMP_ACTION_QUERIED = 4;
+    public static final int BUMP_BLOCK_TILL     = 5;
     
     private ServiceConnection mConnection = new ServiceConnection() {
         // Called when the connection with the service is established
@@ -175,6 +176,10 @@ public class AppChannel {
 
         public void queryAction(int action, Bundle data) {
             mHandler.sendMessage(mHandler.obtainMessage(BUMP_ACTION_QUERIED, action, 0, data));
+        }
+        
+        public void blockTill(long when) {
+            mHandler.sendMessage(mHandler.obtainMessage(BUMP_BLOCK_TILL, new Long(when)));
         }
     };
 }

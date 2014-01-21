@@ -250,6 +250,7 @@ public class JarvisService {
     private ActionProvider mAProvider;
     private State mState;
     private boolean mIsListening;
+    private long mBlockTill;
 
     private static final void log(String s) {
         if(DEBUG)
@@ -543,7 +544,7 @@ public class JarvisService {
      * @param If we should vibrate to send feedback
      */
     private synchronized void listen(boolean v) {
-        if(mState != State.DISABLED && !mIsListening) {
+        if(mState != State.DISABLED && !isBlocked() && !mIsListening) {
             if(v)mVibrator.vibrate(200);
             mIsListening = true;
             mRecognizer.recognize();
@@ -652,6 +653,28 @@ public class JarvisService {
         listen();
     }
 
+    private boolean isBlocked() {
+        return mBlockTill < SystemClock.uptimeMillis(); 
+    }
+
+    private void setBlock(long till) {
+        mBlockTill = till;
+        if(till < SystemClock.uptimeMillis()) {
+            //reapply current state so we can be sure that all values get applied
+            moveToState(mState, null);             //min   sec  milli = 10 min
+        } else if(till > mBlockTill && till - SystemClock.uptimeMillis() < 10 * 60 * 1000) {
+            mMainHandler.removeCallbacks(mResetBlock);
+            mMainHandler.postDelayed(mResetBlock, till - SystemClock.uptimeMillis());
+        }
+    }
+
+    private final Runnable mResetBlock = new Runnable() {
+        @Override
+        public void run() {
+            mMainHandler.sendMessage(mMainHandler.obtainMessage(-1));
+        }
+    };
+
     private void enableShakeListener(boolean b) {
         SensorManager sensorMgr = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
         //Remove the sensor listener if not needed, it will only keep the device active
@@ -697,6 +720,9 @@ public class JarvisService {
         @Override 
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case -1:
+                    mService.setBlock(0);
+                    break;
                 case AppChannel.BUMP_UPDATE_WORDS:
                     mService.lookForUpdate(mService.getBaseOrCopy());
                     break;
@@ -710,6 +736,9 @@ public class JarvisService {
                     break;
                 case AppChannel.BUMP_ACTION_QUERIED:
                     mService.queryAction(msg.arg1, (Bundle)msg.obj);  
+                    break;
+                case AppChannel.BUMP_BLOCK_TILL:
+                    mService.setBlock(((Long)msg.obj).longValue());
                     break;
                 default:
                     super.handleMessage(msg);
