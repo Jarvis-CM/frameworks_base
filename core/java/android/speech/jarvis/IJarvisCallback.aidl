@@ -24,7 +24,7 @@ oneway interface IJarvisCallback {
     
     void newWordsAvailable(long since);
     
-    void listen(long when, boolean continue);
+    void listen(long when, boolean continueListening);
     
     void stop(long when);
 

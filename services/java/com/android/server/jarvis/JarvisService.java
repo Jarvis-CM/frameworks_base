@@ -22,8 +22,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 
 import com.android.internal.policy.*;
 import com.android.server.jarvis.GrammarRecognizer.GrammarMap;
@@ -36,7 +34,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.database.ContentObserver;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -50,16 +47,12 @@ import android.os.Message;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.os.Vibrator;
-import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.speech.jarvis.JarvisConstants;
-import android.speech.tts.TextToSpeech;
 import android.util.Log;
-import android.widget.Toast;
 
 /* ToDo list:
  * TODO: make jarvis a service registered in service manager
- * TODO: implement a better main thread (to generate proper Handlers)
  * TODO: make more settings
  */
 
@@ -71,14 +64,11 @@ import android.widget.Toast;
  */
 public class JarvisService {
     private static final boolean DEBUG = true;
-    //Disabled for now because it is causing too much problems
-    private static final boolean ENABLE_TOAST = false;
     private static final String TAG = "JarvisService";
 
     private static final int SHAKE_THRESHOLD = 800;
-    private static final int AMPLITUDE_THRESHOLD = 40;
     private static final int SERVICE_NOT_READY_TIMEOUT = 45;
-    private static final int MIN_CONFIDENCE = 250;
+    private static final int MIN_CONFIDENCE = 500;
 
     /** That is my own support package */
     private static final String PACKAGE_NAME = "de.firtecy.jarvisbasic";
@@ -88,8 +78,13 @@ public class JarvisService {
     private static final String DEFAULT_NAME = "Jarvis";
     private static final String DEFAULT_SLOT = "@Name";
     private static final String BASE_G2G_FILE = "/system/usr/srec/config/en.us/grammars/grammar_base.g2g";
-    private static final String FALLBACK_G2G_FILE = "/system/usr/srec/config/en.us/grammars/VoiceDialer.g2g";
     //Now all properties have finished
+
+    public static enum State {
+        DISABLED,
+        IDLE,
+        LISTENING
+    }
 
     private static ComponentName sServiceComponentName;
     public static final ComponentName getServiceComponentName() {
@@ -101,9 +96,7 @@ public class JarvisService {
         private long lastUpdate;
 
         @Override
-        public void onAccuracyChanged (Sensor sensor, int accury) {
-            //Nothing...
-        }
+        public void onAccuracyChanged (Sensor sensor, int accury) { }
 
         @Override
         public void onSensorChanged(SensorEvent event) {
@@ -117,9 +110,7 @@ public class JarvisService {
                     float x = event.values[SensorManager.DATA_X];
                     float y = event.values[SensorManager.DATA_Y];
                     float z = event.values[SensorManager.DATA_Z];
-
                     float speed = Math.abs(x+y+z - (lastX + lastY + lastZ)) / diffTime * 10000;
-
                     if (speed > mShakeThreshold) {
                         onShake();
                     }
@@ -134,50 +125,53 @@ public class JarvisService {
     private GrammarRecognizer.GrammarListener mListener = new GrammarRecognizer.GrammarListener() {
         @Override
         public void onRecognitionSuccess(ArrayList<Bundle> results) {
-            mStoppedListening = true;
             try {
                 Bundle result = results.get(0);
                 log("Got something: " + result.getString(GrammarRecognizer.KEY_LITERAL) + " -> " + result.getString(GrammarRecognizer.KEY_MEANING) + " : " + result.getString(GrammarRecognizer.KEY_CONFIDENCE));
-                //Strings are in format: 0[literal] 
-                //                       1[meaning]
-                //                       2[confidence]
-                ArrayList<String>list = new ArrayList<String>();
-                list.add(result.getString(GrammarRecognizer.KEY_LITERAL, ""));
-                list.add(result.getString(GrammarRecognizer.KEY_MEANING, ""));
-                list.add(result.getString(GrammarRecognizer.KEY_CONFIDENCE, ""));
-                //Check if the confidence
-                int con = Integer.parseInt(list.get(2));
-                if(con > MIN_CONFIDENCE) {
-                    if(mChannel != null && mChannel.isConnected())
-                        mChannel.sendString(list);
+                if(mState != State.IDLE) {
+                    //Strings are in format: 0[literal]
+                    //                       1[meaning]
+                    //                       2[confidence]
+                    ArrayList<String>list = new ArrayList<String>();
+                    list.add(result.getString(GrammarRecognizer.KEY_LITERAL, ""));
+                    list.add(result.getString(GrammarRecognizer.KEY_MEANING, ""));
+                    list.add(result.getString(GrammarRecognizer.KEY_CONFIDENCE, ""));
+                    //Check if the confidence
+                    int con = Integer.parseInt(list.get(2));
+                    if(con > MIN_CONFIDENCE) {
+                        if(mChannel != null && mChannel.isConnected())
+                            mChannel.sendString(list);
+                    } else {
+                        log("Confidence was too low to be a valid result confidence='" + con + "'");
+                    }
                 } else {
-                    log("Confidence was too low to be a valid result confidence='" + con + "'");
+                    String meaning = result.getString(GrammarRecognizer.KEY_MEANING, "");
+                    if(meaning.equals(DEFAULT_NAME)) {
+                        moveToState(State.LISTENING, null);
+                        //Parse again to make sure the service gets notified as-well
+                        onRecognitionSuccess(results);
+                    }
                 }
-                if(ENABLE_TOAST)
-                    Toast.makeText(mContext, "Got something: " + result.getString(GrammarRecognizer.KEY_LITERAL), Toast.LENGTH_SHORT);
             } catch (Exception ex) {
                 log("Failed to parse result of recognizing.", ex);
             }
-            if(mListenEx) {
-                listen(false);
-            }
+            resetListening();
         }
-        
+
         @Override
         public void onRecognitionFailure() {
-            mStoppedListening = true;
-            if(mListenEx) {
-                listen(false);
-            }
+            resetListening();
         }
-        
+
         @Override
         public void onRecognitionError(String reason) {
-            mStoppedListening = true;
-            log("Failed to recognize because of: " + reason);
-            if(mListenEx) {
-                listen(false);
-            }
+            resetListening();
+            log("Failed to listen: " + reason);
+        }
+
+        private void resetListening() {
+            if(mState == State.LISTENING) listen(false);
+            mIsListening = false;
         }
     };
     
@@ -194,6 +188,8 @@ public class JarvisService {
                     Settings.System.JARVIS_SERVICE_LISTEN_WAKE_UP), false, this);
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.JARVIS_SERVICE_SHAKE_THRESHOLD), false, this);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.JARVIS_SERVICE_LISTEN_LOCK), false, this);
         }
 
         @Override
@@ -208,6 +204,12 @@ public class JarvisService {
             mListenEverytime = (mListenMode & 4) == 4;
             String service =
                     Settings.System.getString(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_KEYS);
+            int m = Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_LOCK, 1);
+            switch(m) {
+                case 0: moveToState(State.LISTENING, null); break;
+                case 1: moveToState(State.IDLE, null); break;
+                case 2: moveToState(State.DISABLED, null); break;
+            }
             if(service != null) {
                 String[] c = service.split(";");
                 if(c.length == 2) {
@@ -224,20 +226,14 @@ public class JarvisService {
     private Context mContext;
     private Thread mMainThread;
 
-    private boolean mSRunning;
-    private boolean mListenEx;
-    private SoundMeter mSMeter;
     private SettingsObserver mObserver;
     
     private IJarvisPolicy mPolicy;
-    private boolean mStoppedListening;
     private Sensor mAccelerometer;
     
     private AppChannel mChannel;
     
     private GrammarRecognizer mRecognizer;
-    private Thread mVolumeThread;
-    private boolean mVolume;
     private GrammarMap mGrammar;
     private Handler mMainHandler;
     private Vibrator mVibrator;
@@ -249,11 +245,11 @@ public class JarvisService {
     private String mServicePackage;
     private String mServiceName;
     private int mShakeThreshold;
-    private int mAmplitudeThreshold;
     private long mLastChange;
     private SharedPreferences mPreferences;
     private ActionProvider mAProvider;
-    private boolean mReady;
+    private State mState;
+    private boolean mIsListening;
 
     private static final void log(String s) {
         if(DEBUG)
@@ -267,7 +263,7 @@ public class JarvisService {
     
     public JarvisService(Context con, Handler wmHandler) {
         mContext = con;
-        mStoppedListening = true;
+        mState = State.DISABLED;
         mChannel = null;
         mMainHandler = null;
         mGrammar = new GrammarMap();
@@ -278,7 +274,6 @@ public class JarvisService {
             Log.e(TAG, "Failed to generate GrammarRecognizer", ex);
         }
         log("Created Jarvis Service");
-        mListenEx = false;
         mMainThread = new WorkerThread("JarvisServiceThread");
         mAProvider = new ActionProvider(con, this);
         
@@ -290,10 +285,26 @@ public class JarvisService {
         mServicePackage = PACKAGE_NAME;
         mServiceName = PACKAGE_SERVICE_NAME;
         mShakeThreshold = SHAKE_THRESHOLD;
-        mAmplitudeThreshold = AMPLITUDE_THRESHOLD;
         mPreferences = mContext.getSharedPreferences(DEFAULT_NAME, 0);
         mLastChange = mPreferences.getLong("last_checked_words", -1);
-        mReady = false;
+    }
+
+    protected void moveToState(State s, Bundle data) {
+        switch(s) {
+            case DISABLED:
+                enableListenEverytime(false);
+                enableShakeListener(false);
+                break;
+            case IDLE:
+                enableListenEverytime(false);
+                enableShakeListener(true);
+                break;
+            case LISTENING:
+                enableListenEverytime(true);
+                enableShakeListener(true);
+                break;
+        }
+        mState = s;
     }
     
     /**
@@ -302,36 +313,6 @@ public class JarvisService {
     public void systemReady() {
         log("System Server is ready, now start the main thread");
         mMainThread.start();
-    }
-    
-    //TODO: make a better implementation
-    /**
-     * Currently disabled because it needs a better implementation
-     *
-     */
-    private void startVolumeThread() {
-        if(mVolumeThread != null)
-            stopVolumeThread();
-        mVolume = true;
-        mVolumeThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while(mVolume && !Thread.interrupted()) {
-                    if(mSMeter.getAmplitude() > mAmplitudeThreshold) {
-                        log("Volume was higher then: " + mAmplitudeThreshold + " it was :" + mSMeter.getAmplitude());
-                        listen(true);
-                    }
-                }
-            }
-        });
-        mVolumeThread.start();
-    }
-    
-    private void stopVolumeThread() {
-        mVolume = false;
-        if(mVolumeThread != null)
-            mVolumeThread.interrupt();
-        mVolumeThread = null;
     }
     
     /**
@@ -408,20 +389,12 @@ public class JarvisService {
      * This will copy a valid precompiled grammar to the data partition.
      * @return File the grammar file to use as a bases
      */
-    private File getBase() {
+    private File getBaseOrCopy() {
         File base = JarvisFileUtils.getBaseGrammarFile();
         if(!base.exists()) {
             try {
                 //Get a base grammar file
                 File orig = new File(BASE_G2G_FILE);
-                
-                //The fallback grammar file will cause issues and wrong results
-                //TODO: Search for a better replacement
-                /*if(!orig.exists()) {
-                    log("No file in default location. Going back to fallback.");
-                    orig = new File(FALLBACK_G2G_FILE);
-                }*/
-                
                 InputStream in = new FileInputStream(orig);
                 FileOutputStream out = new FileOutputStream(base);
                 
@@ -444,7 +417,7 @@ public class JarvisService {
         mPolicy = PolicyManager.getJarvisPolicy(mContext);
         mPolicy.assignSystemService(this);
         
-        File base = getBase();
+        File base = getBaseOrCopy();
 
         //Now start binding with the service
         log("Connecting to service " + mServiceName + " in package " + mServicePackage);
@@ -477,15 +450,9 @@ public class JarvisService {
             log("Now connected to service that is ready. (Took " + (SystemClock.uptimeMillis() - start) + " ms)");
             sServiceComponentName = mChannel.getComponentName();
             log("Service targets API: " + mChannel.getTargetApi() + " framework supports " + Build.JARVIS_VERSION);
-        } catch (RemoteException ex) {
+        } catch (Exception ex) {
             log("Catched a remote exception while waiting till Service is ready. Cancel.", ex);
             return false;
-        } catch (SecurityException e) {
-            log("Failed to connect to service. Cancel.", e);
-            return false;
-        } catch (Throwable t) {
-            //Just to be sure. We don't want to end in a bootloop
-            log("Failed to connect to the service. Cancel", t);
         }
         
         if(!lookForUpdate(base))
@@ -498,8 +465,6 @@ public class JarvisService {
         BroadcastReceiver mReceiver = new SettingsReceiver();
         mContext.registerReceiver(mReceiver, filter);
 
-        mSMeter = new SoundMeter();
-        mReady = true;
         onScreenOn();
         return true;
     }
@@ -512,7 +477,9 @@ public class JarvisService {
         final int length = mChannel.getCountWords();
         int num = mPreferences.getInt("last_count", -1);
         
-        boolean update = !out.exists() || mLastChange < last || length != num;
+        boolean update = mLastChange < last || length != num;
+        if(!update && out.exists()) log("We don't have to update.");
+        else update = true;
         
         if(update) {//If we need an update add all words again
             mPreferences.edit().putLong("last_checked_words", last).commit();
@@ -545,17 +512,13 @@ public class JarvisService {
                             literal += s[3];
                         else literal += word.toLowerCase();
                         literal += "'";
-                        mGrammar.addWord(DEFAULT_SLOT, word, pron, 1, literal);
+                        mGrammar.addWord(DEFAULT_SLOT, word, pron, 5, literal);
                         log("Added word: " + word + " from '" + t + "'");
                         num++;
                     } else {
                         log("Word at position " + i + " had wrong format('" + t + "') Skipping.");
                     }
-                } catch (RemoteException ex) {
-                    log("Failed to fetch word at: " + i, ex);
-                } catch (NullPointerException ex) {
-                    log("Failed to fetch word at: " + i, ex);
-                } catch (IndexOutOfBoundsException ex) {
+                } catch (Exception ex) {
                     log("Failed to fetch word at: " + i, ex);
                 }
             }
@@ -580,9 +543,9 @@ public class JarvisService {
      * @param If we should vibrate to send feedback
      */
     private synchronized void listen(boolean v) {
-        if(mStoppedListening && mReady) {
+        if(mState != State.DISABLED && !mIsListening) {
             if(v)mVibrator.vibrate(200);
-            mStoppedListening = false;
+            mIsListening = true;
             mRecognizer.recognize();
         }
     }
@@ -595,8 +558,11 @@ public class JarvisService {
      * Call this to interrupt listening. If the service doesn't listen, it does nothing.
      */
     private synchronized void stop() {
-        if(!mStoppedListening && mReady) {
+        if(!mIsListening && mRecognizer != null) {
             mRecognizer.stop();
+        }
+        if(mState != State.DISABLED) {
+            moveToState(State.IDLE, null);
         }
     }
     
@@ -621,8 +587,7 @@ public class JarvisService {
      * @return whether it is callable
      */
     private boolean isCallable(Intent intent) {
-         List<ResolveInfo> list = mContext.getPackageManager().queryIntentServices(intent, 0);
-         return list.size() > 0;
+         return mContext.getPackageManager().queryIntentServices(intent, 0).size() > 0;
     }
 
     /**
@@ -631,9 +596,8 @@ public class JarvisService {
      * @return whether the app is installed or not
      */
     private boolean isAppInstalled(String uri) {
-        PackageManager pm = mContext.getPackageManager();
         try {
-            pm.getPackageInfo(uri, PackageManager.GET_ACTIVITIES);
+            mContext.getPackageManager().getPackageInfo(uri, PackageManager.GET_ACTIVITIES);
         } catch (PackageManager.NameNotFoundException e) {
             return false;
         }
@@ -641,7 +605,7 @@ public class JarvisService {
     }
 
     private void enableListenEverytime(boolean t) {
-        mListenEx = t;
+        mState = State.LISTENING;
         listen();
     }
     
@@ -691,9 +655,9 @@ public class JarvisService {
     private void enableShakeListener(boolean b) {
         SensorManager sensorMgr = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
         //Remove the sensor listener if not needed, it will only keep the device active
-        if(b && !mSRunning && mOnShakeListen) {
+        if(b && mOnShakeListen && mState != State.DISABLED) {
             sensorMgr.registerListener(mShakeDetector, mAccelerometer, SensorManager.SENSOR_DELAY_NORMAL);
-        } else if (!b && mSRunning) {
+        } else if (!b) {
             sensorMgr.unregisterListener(mShakeDetector);
         }
     }
@@ -734,7 +698,7 @@ public class JarvisService {
         public void handleMessage(Message msg) {
             switch (msg.what) {
                 case AppChannel.BUMP_UPDATE_WORDS:
-                    mService.lookForUpdate(mService.getBase());
+                    mService.lookForUpdate(mService.getBaseOrCopy());
                     break;
                 case AppChannel.BUMP_LISTEN:
                     boolean b = (msg.obj instanceof Boolean 
