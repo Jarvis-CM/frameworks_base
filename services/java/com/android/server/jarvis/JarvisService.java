@@ -54,14 +54,16 @@ import android.speech.jarvis.JarvisConstants;
 import android.util.Log;
 
 /* ToDo list:
- * TODO: make jarvis a service registered in service manager
  * TODO: make more settings
+ * TODO: Fix
+ * E/SharedPreferencesImpl( 2197): Couldn't create directory for SharedPreferences file shared_prefs/Jarvis.xml
+ * E/SharedPreferencesImpl( 2197): Couldn't create directory for SharedPreferences file shared_prefs/Jarvis.xml
  */
 
 /**
  * The Jarvis Service that runs in the system server. 
  * NOTICE! If any type of Exception occurs and it is not catched then we will end up in 
- * a bootloop so catch every Exception and Log them!
+ * a soft reboot or bootloop so catch every Exception and log them only!
  * @author Firtecy
  */
 public class JarvisService extends IJarvisService.Stub {
@@ -69,6 +71,7 @@ public class JarvisService extends IJarvisService.Stub {
     private static final String TAG = "JarvisService";
 
     private static final int SHAKE_THRESHOLD = 800;
+    /** in seconds */
     private static final int SERVICE_NOT_READY_TIMEOUT = 45;
     private static final int MIN_CONFIDENCE = 500;
 
@@ -138,7 +141,8 @@ public class JarvisService extends IJarvisService.Stub {
                     list.add(result.getString(GrammarRecognizer.KEY_LITERAL, ""));
                     list.add(result.getString(GrammarRecognizer.KEY_MEANING, ""));
                     list.add(result.getString(GrammarRecognizer.KEY_CONFIDENCE, ""));
-                    //Check if the confidence
+
+                    //Check if the confidence is higher than the min confidence
                     int con = Integer.parseInt(list.get(2));
                     if(con > MIN_CONFIDENCE) {
                         if(mChannel != null && mChannel.isConnected())
@@ -150,6 +154,7 @@ public class JarvisService extends IJarvisService.Stub {
                     String meaning = result.getString(GrammarRecognizer.KEY_MEANING, "");
                     if(meaning.equals(DEFAULT_NAME)) {
                         moveToState(State.LISTENING, null);
+
                         //Parse again to make sure the service gets notified as-well
                         onRecognitionSuccess(results);
                     }
@@ -175,7 +180,7 @@ public class JarvisService extends IJarvisService.Stub {
             if(mState == State.LISTENING) listen(false);
             mIsListening = false;
         }
-    };
+    }; //End of grammar listener
     
     private final class SettingsObserver extends ContentObserver {
         SettingsObserver(Handler handler) {
@@ -270,6 +275,9 @@ public class JarvisService extends IJarvisService.Stub {
         mChannel = null;
         mMainHandler = null;
         mGrammar = new GrammarMap();
+        //Used for detection
+        mAccelerometer = ((SensorManager)mContext.getSystemService(Context.SENSOR_SERVICE))
+                .getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         try {
             mRecognizer = new GrammarRecognizer(con);
             mRecognizer.setListener(mListener);
@@ -357,10 +365,7 @@ public class JarvisService extends IJarvisService.Stub {
     private void prepare() {
         if(!JarvisFileUtils.accessJarvisLocation())
             log("No write permission ot Jarvis Location");
-        
-        //Used for detection
-        mAccelerometer = ((SensorManager)mContext.getSystemService(Context.SENSOR_SERVICE))
-                .getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+
         mVibrator = (Vibrator)mContext.getSystemService(Context.VIBRATOR_SERVICE);
 
         //Look for settings changes
@@ -703,8 +708,9 @@ public class JarvisService extends IJarvisService.Stub {
         SensorManager sensorMgr = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
         //Remove the sensor listener if not needed, it will only keep the device active
         if(b && mOnShakeListen && mState != State.DISABLED) {
-            log("Trying to enable(" + b + ") ShakeListener -> register.");
-            sensorMgr.registerListener(mShakeDetector, mAccelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+            log("Trying to enable(" + b + ") ShakeListener -> register. The operation was " + 
+                    sensorMgr.registerListener(mShakeDetector, mAccelerometer, 
+                            SensorManager.SENSOR_DELAY_NORMAL));
         } else if (!b) {
             log("Trying to enable(" + b + ") ShakeListener -> unregister.");
             sensorMgr.unregisterListener(mShakeDetector);
