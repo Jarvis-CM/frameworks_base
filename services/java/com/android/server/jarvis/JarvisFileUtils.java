@@ -24,7 +24,7 @@ public class JarvisFileUtils {
     private static final String LOCATION = "/data/misc/jarvis/";
     private static final File JARVIS_LOCATION = new File(LOCATION);
     
-    public static final boolean accessJarvisLocation() {
+    public static final boolean accessJarvisFileLocation() {
         File file = JARVIS_LOCATION;
         if(!file.exists())
             file.mkdirs();

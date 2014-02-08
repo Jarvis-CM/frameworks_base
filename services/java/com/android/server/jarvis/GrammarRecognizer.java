@@ -162,8 +162,10 @@ public class GrammarRecognizer {
                     case Recognizer.EVENT_INCOMPLETE:
                     case Recognizer.EVENT_STARTED:
                     case Recognizer.EVENT_START_OF_VOICING:
-                    case Recognizer.EVENT_END_OF_VOICING:
                         continue;
+                    case Recognizer.EVENT_END_OF_VOICING:
+                        mListener.onVoiceEnded();
+                        break;
                     case Recognizer.EVENT_RECOGNITION_RESULT:
                         onRecognitionSuccess();
                         break;
@@ -229,6 +231,8 @@ public class GrammarRecognizer {
         public void onRecognitionFailure();
 
         public void onRecognitionError(String reason);
+
+        public void onVoiceEnded();
     }
 
     public static class GrammarMap {

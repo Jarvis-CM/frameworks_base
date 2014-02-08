@@ -180,6 +180,11 @@ public class JarvisService extends IJarvisService.Stub {
             if(mState == State.LISTENING) listen(false);
             mIsListening = false;
         }
+
+        @Override
+        public void onVoiceEnded() {
+            //Will be used later
+        }
     }; //End of grammar listener
     
     private final class SettingsObserver extends ContentObserver {
@@ -342,6 +347,7 @@ public class JarvisService extends IJarvisService.Stub {
                     && c.getClassName().equals(mServiceName)) 
                     && isAppInstalled(mServicePackage)) {
                 newService = true;
+                log("Disconnected from service.");
                 try {
                     mChannel.disconnect();
                 } catch (Exception ex) {
@@ -350,12 +356,13 @@ public class JarvisService extends IJarvisService.Stub {
                 mChannel = null;
             }
         }
+
         //Go through the events to reset settings and receivers
         if(wasScreenOn) onScreenOn();
         else onScreenOff();
         if(isCharging)onPowerConnect();
         else onPowerDisconnect();
-        
+
         //Now connected to new service
         if(newService && init()) {
             log("Successful switched to new service.");
@@ -363,8 +370,8 @@ public class JarvisService extends IJarvisService.Stub {
     }
 
     private void prepare() {
-        if(!JarvisFileUtils.accessJarvisLocation())
-            log("No write permission ot Jarvis Location");
+        if(!JarvisFileUtils.accessJarvisFileLocation())
+            log("No write permission to Jarvis File Location.");
 
         mVibrator = (Vibrator)mContext.getSystemService(Context.VIBRATOR_SERVICE);
 
@@ -380,11 +387,10 @@ public class JarvisService extends IJarvisService.Stub {
                 return;//We succeded and shouldn't continue
         }
         
-        //This means there is no package installed 
+        //This means there is no package installed. So look if we get a compatible package
         log("Service package is not installed. package=" + mServicePackage);
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
-        //intentFilter.addAction(Intent.ACTION_PACKAGE_INSTALL);
         intentFilter.addDataScheme("package");
         mContext.registerReceiver(new BroadcastReceiver() {
             @Override
@@ -435,7 +441,7 @@ public class JarvisService extends IJarvisService.Stub {
         //Now start binding with the service
         log("Connecting to service " + mServiceName + " in package " + mServicePackage);
         mChannel = new AppChannel(mContext, mServicePackage, mServiceName, mMainHandler);
-        if(!isCallable(mChannel.getIntent())) {
+        if(!isCallableService(mChannel.getIntent())) {
             log("A connection to the service won't work. Cancel.");
             return false;
         }
@@ -449,7 +455,7 @@ public class JarvisService extends IJarvisService.Stub {
         
         try {
             final long start = SystemClock.uptimeMillis();
-            //Wait till it is ready, but kill it when it needs to long. > SERVICE_NOT_READY_TIMEOUT s
+            //Wait till the service is ready, but kill it when it needs to long. > SERVICE_NOT_READY_TIMEOUT in s
             while(!mChannel.isReady()) {
                 try {
                     Thread.sleep(50);
@@ -551,9 +557,9 @@ public class JarvisService extends IJarvisService.Stub {
     }
 
     /**
-     * Call this to start listening. When the listening is not 
+     * Call this to start listening. When the listening has not 
      * finished yet this will do nothing.
-     * @param If we should vibrate to send feedback
+     * @param boolean If we should vibrate to send feedback
      */
     private synchronized void listen(boolean v) {
         if(mState != State.DISABLED && !isBlocked() && !mIsListening) {
@@ -568,7 +574,7 @@ public class JarvisService extends IJarvisService.Stub {
     }
 
     /**
-     * Call this to interrupt listening. If the service doesn't listen, it does nothing.
+     * Call this to interrupt listening. If the service doesn't listen, this will do nothing.
      */
     private synchronized void stop() {
         if(!mIsListening && mRecognizer != null) {
@@ -580,7 +586,7 @@ public class JarvisService extends IJarvisService.Stub {
     }
     
     /**
-     * When we receive a query from the service, here it get handled
+     * When we receive a query from the service, this method will handle the query
      */
     private void queryAction(final int action, Bundle data) {
         try {
@@ -610,17 +616,17 @@ public class JarvisService extends IJarvisService.Stub {
 
     /**
      * Check if the given Intent is a callable service
-     * @param intent the intent to check
-     * @return whether it is callable
+     * @param Intent the intent to check
+     * @return boolean whether it is callable or not
      */
-    private boolean isCallable(Intent intent) {
+    private boolean isCallableService(Intent intent) {
          return mContext.getPackageManager().queryIntentServices(intent, 0).size() > 0;
     }
 
     /**
      * Check if the given package is installed or not.
-     * @param uri the package uri
-     * @return whether the app is installed or not
+     * @param String uri the package uri
+     * @return boolean whether the app is installed or not
      */
     private boolean isAppInstalled(String uri) {
         try {
@@ -740,7 +746,7 @@ public class JarvisService extends IJarvisService.Stub {
     }
 
     /**
-     * handler for Jarvis. Used for AppChannel conection
+     * Handler for Jarvis. Used for AppChannel connection
      */
     static final class JarvisHandler extends Handler {
         private final JarvisService mService;
@@ -778,6 +784,9 @@ public class JarvisService extends IJarvisService.Stub {
         }
     }
 
+    /**
+     * A worker Thread that will call the JarvisService.prepare() method after it has been started.
+     */
     private final class WorkerThread extends Thread {
 
         private Handler mWorkerHandler;
