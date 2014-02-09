@@ -1070,6 +1070,7 @@
   <java-symbol type="drawable" name="jog_tab_target_gray" />
   <java-symbol type="drawable" name="picture_emergency" />
   <java-symbol type="drawable" name="platlogo" />
+  <java-symbol type="drawable" name="cm_platlogo" />
   <java-symbol type="drawable" name="stat_notify_sync_error" />
   <java-symbol type="drawable" name="stat_notify_wifi_in_range" />
   <java-symbol type="drawable" name="stat_notify_rssi_in_range" />
@@ -1855,7 +1856,7 @@
   <!-- Gesture Sensor -->
   <java-symbol type="bool" name="config_enableGestureService" />
 
-  <!-- Electron Beam -->
+  <!-- Screen off animation -->
   <java-symbol type="bool" name="config_screenOffAnimation" />
 
   <!-- Privacy Guard -->
@@ -1946,8 +1947,5 @@
   <java-symbol type="string" name="symbol_picker_Y" />
   <java-symbol type="string" name="symbol_picker_z" />
   <java-symbol type="string" name="symbol_picker_Z" />
-
-  <!-- Lock screen always show battery -->
-  <java-symbol type="string" name="lockscreen_discharging" />
 
 </resources>
