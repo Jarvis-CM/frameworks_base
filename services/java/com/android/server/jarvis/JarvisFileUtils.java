@@ -38,7 +38,7 @@ public class JarvisFileUtils {
     }
     
     public static final File getSrecGrammarFile(String ident) {
-        return new File(LOCATION + "grammar_" + Build.JARVIS_VERSION + "_" + ident.hashCode() + ".g2g");
+        return new File(LOCATION + "grammar_" + Build.JARVIS_VERSION + "_" + ident + ".g2g");
     }
     
     public static final File getBaseGrammarFile() {

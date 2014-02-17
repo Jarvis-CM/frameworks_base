@@ -133,6 +133,8 @@ public class JarvisService extends IJarvisService.Stub {
             try {
                 Bundle result = results.get(0);
                 log("Got something: " + result.getString(GrammarRecognizer.KEY_LITERAL) + " -> " + result.getString(GrammarRecognizer.KEY_MEANING) + " : " + result.getString(GrammarRecognizer.KEY_CONFIDENCE));
+
+                //First check for the right state. If we are in idle mode we will send the results directly to the service
                 if(mState != State.IDLE) {
                     //Strings are in format: 0[literal]
                     //                       1[meaning]
@@ -242,6 +244,7 @@ public class JarvisService extends IJarvisService.Stub {
     
     private IJarvisPolicy mPolicy;
     private Sensor mAccelerometer;
+    private BroadcastReceiver mReceiver;
     
     private AppChannel mChannel;
     
@@ -360,7 +363,7 @@ public class JarvisService extends IJarvisService.Stub {
         //Go through the events to reset settings and receivers
         if(wasScreenOn) onScreenOn();
         else onScreenOff();
-        if(isCharging)onPowerConnect();
+        if(isCharging) onPowerConnect();
         else onPowerDisconnect();
 
         //Now connected to new service
@@ -477,13 +480,14 @@ public class JarvisService extends IJarvisService.Stub {
         if(!lookForUpdate(base))
             return false;
         
-        IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
-        filter.addAction(Intent.ACTION_SCREEN_OFF);
-        filter.addAction(Intent.ACTION_POWER_CONNECTED);
-        filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
-        BroadcastReceiver mReceiver = new SettingsReceiver();
-        mContext.registerReceiver(mReceiver, filter);
-
+        if(mReceiver == null) {
+            IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+            filter.addAction(Intent.ACTION_SCREEN_OFF);
+            filter.addAction(Intent.ACTION_POWER_CONNECTED);
+            filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+            mReceiver = new SettingsReceiver();
+            mContext.registerReceiver(mReceiver, filter);
+        }
         onScreenOn();
         return true;
     }
@@ -508,6 +512,7 @@ public class JarvisService extends IJarvisService.Stub {
             mGrammar.addWord(DEFAULT_SLOT, "Ok", null, 1, "V='ok'");
             mGrammar.addWord(DEFAULT_SLOT, "Okay " + DEFAULT_NAME, null, 1, "V='Jarvis'");
             log("Now fetching words from service.");
+
             final long start = SystemClock.uptimeMillis();
             num = 0;
             int i = 0;
@@ -531,6 +536,8 @@ public class JarvisService extends IJarvisService.Stub {
                             literal += s[3];
                         else literal += word.toLowerCase();
                         literal += "'";
+
+                        //Now add it to the grammar
                         mGrammar.addWord(DEFAULT_SLOT, word, pron, 5, literal);
                         log("Added word: " + word + " from '" + t + "'");
                         num++;
@@ -566,7 +573,7 @@ public class JarvisService extends IJarvisService.Stub {
             if(v)mVibrator.vibrate(200);
             mIsListening = true;
             mRecognizer.recognize();
-        }
+        } else log("Was not able to start listening.");
     }
     
     private synchronized void listen() {
@@ -577,7 +584,7 @@ public class JarvisService extends IJarvisService.Stub {
      * Call this to interrupt listening. If the service doesn't listen, this will do nothing.
      */
     private synchronized void stop() {
-        if(!mIsListening && mRecognizer != null) {
+        if(mIsListening && mRecognizer != null) {
             mRecognizer.stop();
         }
         if(mState != State.DISABLED) {
@@ -665,7 +672,7 @@ public class JarvisService extends IJarvisService.Stub {
             enableShakeListener(true);
     }
     
-    private void onPowerDisconnect () {
+    private void onPowerDisconnect() {
         log("Power disconnected. Checking modes.");
         if ((wasScreenOn && mListenSOn) || mListenEverytime) {
             enableListenEverytime(true);
@@ -688,7 +695,7 @@ public class JarvisService extends IJarvisService.Stub {
     }
 
     private boolean isBlocked() {
-        return mBlockTill < SystemClock.uptimeMillis(); 
+        return mBlockTill > SystemClock.uptimeMillis(); 
     }
 
     private void setBlock(long till) {
