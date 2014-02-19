@@ -19,7 +19,7 @@ package android.speech.jarvis;
 import java.util.List;
 import android.os.Bundle;
 
-/** oneway service interface */
+/** {@hide} oneway service interface */
 oneway interface IJarvisCallback {
     
     void newWordsAvailable(long since);

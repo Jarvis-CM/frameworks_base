@@ -1,5 +1,6 @@
 package android.speech.jarvis;
 
+/** @hide */
 public final class JarvisConstants {
     private JarvisConstants () {}
     

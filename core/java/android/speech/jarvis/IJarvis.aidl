@@ -19,7 +19,7 @@ package android.speech.jarvis;
 import java.util.List;
 import android.speech.jarvis.IJarvisCallback;
 
-/** Jarvis service interface */
+/** {@hide} Jarvis service interface */
 interface IJarvis {
     
     int getTargetedApi();
