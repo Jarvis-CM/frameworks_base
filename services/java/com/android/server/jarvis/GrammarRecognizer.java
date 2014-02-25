@@ -173,7 +173,8 @@ public class GrammarRecognizer {
                         mSrec.putAudio(mic);
                         continue;
                     case Recognizer.EVENT_NO_MATCH:
-                        mListener.onRecognitionFailure();
+                        if (mListener != null)
+                            mListener.onRecognitionFailure();
                     default:
                         if (mListener != null)
                             mListener.onRecognitionError(Recognizer.eventToString(event));
@@ -185,6 +186,10 @@ public class GrammarRecognizer {
             // do nothing
         } catch (IllegalStateException e) {
             Log.e(TAG, e.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start recognizing.", e);
+            if (mListener != null)
+                mListener.onRecognitionFailure();
       } finally {
             try {
                 if (mic != null)
