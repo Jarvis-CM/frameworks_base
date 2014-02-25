@@ -371,6 +371,10 @@ public class JarvisService extends IJarvisService.Stub {
             log("Successful switched to new service.");
         }
     }
+    
+    private boolean isConnectedToService() {
+        return mChannel != null && mChannel.isConnected();
+    }
 
     private void prepare() {
         if(!JarvisFileUtils.accessJarvisFileLocation())
@@ -569,11 +573,24 @@ public class JarvisService extends IJarvisService.Stub {
      * @param boolean If we should vibrate to send feedback
      */
     private synchronized void listen(boolean v) {
-        if(mState != State.DISABLED && !isBlocked() && !mIsListening) {
-            if(v)mVibrator.vibrate(200);
-            mIsListening = true;
-            mRecognizer.recognize();
-        } else log("Was not able to start listening.");
+        if(mState == State.DISABLED) {
+            log("Couldn't listen because we are in Disabled Mode.");
+            return;
+        }
+        if(isBlocked()) {
+            log("Couldn't listen because we are blocked till: " + mBlockTill);
+            return;
+        }
+        if(mIsListening) {
+            log("Couldn't listen because we are already listening.");
+        }
+        if(!isConnectedToService()) {
+            log("Couldn't listen because no Service is connected.");
+        }
+        
+        if(v)mVibrator.vibrate(200);
+        mIsListening = true;
+        mRecognizer.recognize();
     }
     
     private synchronized void listen() {
