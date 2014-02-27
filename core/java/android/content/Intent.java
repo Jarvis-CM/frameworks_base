@@ -1297,6 +1297,21 @@ public class Intent implements Parcelable, Cloneable {
      * @hide
      */
     public static final String ACTION_JARVIS_VOICE_CONTROL = "android.intent.action.JARVIS_VOICE_CONTROL";
+    
+    /**
+     * Activity Action: The settings activity for a package with a Jarvis service. <br>
+     * Needs: {@link #ACTION_JARVIS_VOICE_CONTROL}
+     * @hide
+     */
+    public static final String ACTION_JARVIS_VOICE_SETTINGS = "android.intent.action.JARVIS_VOICE_SETTINGS";
+    
+    /**
+     * Activity Action: <br>
+     * The display activity when the service will be called for a package with a Jarvis service. 
+     * Needs: {@link #ACTION_JARVIS_VOICE_CONTROL}
+     * @hide
+     */
+    public static final String ACTION_JARVIS_VOICE_ACTIVITY = "android.intent.action.JARVIS_VOICE_ACTIVITY";
 
     /**
      * Activity Action: Launch application installer.

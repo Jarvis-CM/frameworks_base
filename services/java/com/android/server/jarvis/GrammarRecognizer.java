@@ -164,7 +164,8 @@ public class GrammarRecognizer {
                     case Recognizer.EVENT_START_OF_VOICING:
                         continue;
                     case Recognizer.EVENT_END_OF_VOICING:
-                        mListener.onVoiceEnded();
+                        if (mListener != null)
+                            mListener.onVoiceEnded();
                         break;
                     case Recognizer.EVENT_RECOGNITION_RESULT:
                         onRecognitionSuccess();
@@ -274,7 +275,7 @@ public class GrammarRecognizer {
         }
     }
 
-    private static class GrammarEntry {
+    static class GrammarEntry {
         String word;
         String pron;
         int weight;

@@ -26,6 +26,9 @@ import java.util.ArrayList;
 import com.android.internal.policy.*;
 import com.android.server.jarvis.GrammarRecognizer.GrammarMap;
 
+import android.app.ActivityManager;
+import android.app.ActivityManagerNative;
+import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentResolver;
@@ -39,14 +42,17 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.IJarvisService;
+import android.os.IPowerManager;
 import android.os.Looper;
 import android.os.Message;
 import android.os.RemoteException;
+import android.os.ServiceManager;
 import android.os.SystemClock;
 import android.os.Vibrator;
 import android.provider.Settings;
@@ -157,6 +163,8 @@ public class JarvisService extends IJarvisService.Stub {
                     if(meaning.equals(DEFAULT_NAME)) {
                         moveToState(State.LISTENING, null);
 
+                        wakeUpDevice();
+                        
                         //Parse again to make sure the service gets notified as-well
                         onRecognitionSuccess(results);
                     }
@@ -179,7 +187,8 @@ public class JarvisService extends IJarvisService.Stub {
         }
 
         private void resetListening() {
-            if(mState == State.LISTENING) listen(false);
+            if(shouldListen())
+                listen(false);
             mIsListening = false;
         }
 
@@ -209,16 +218,20 @@ public class JarvisService extends IJarvisService.Stub {
         @Override
         public void onChange(boolean selfChange) {
             mShakeThreshold =
-                    Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_SHAKE_THRESHOLD, SHAKE_THRESHOLD);
+                    Settings.System.getIntForUser(mContext.getContentResolver(),
+                            Settings.System.JARVIS_SERVICE_SHAKE_THRESHOLD, SHAKE_THRESHOLD,
+                            ActivityManager.getCurrentUser());
             mOnShakeListen = mShakeThreshold > 0; 
             mListenMode =
-                    Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_WAKE_UP, 3);
+                    Settings.System.getIntForUser(mContext.getContentResolver(),
+                            Settings.System.JARVIS_SERVICE_LISTEN_WAKE_UP, 3,
+                            ActivityManager.getCurrentUser());
             mListenSOn = (mListenMode & 1) == 1;
             mListenP = (mListenMode & 2) == 2;
             mListenEverytime = (mListenMode & 4) == 4;
             String service =
-                    Settings.System.getString(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_KEYS);
-            int m = Settings.System.getInt(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_LOCK, 1);
+                    Settings.System.getStringForUser(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_KEYS, ActivityManager.getCurrentUser());
+            int m = Settings.System.getIntForUser(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_LOCK, 1, ActivityManager.getCurrentUser());
             switch(m) {
                 case 0: moveToState(State.LISTENING, null); break;
                 case 1: moveToState(State.IDLE, null); break;
@@ -237,35 +250,141 @@ public class JarvisService extends IJarvisService.Stub {
         }
     }
 
+    /**
+     * System Server context
+     */
     private Context mContext;
+    
     private Thread mMainThread;
 
+    /** 
+     * SettingsObserver to listen for changes in the listen modes
+     */
     private SettingsObserver mObserver;
     
+    /** 
+     * Power manager to determine the screen on/off state and control over the screen
+     */
+    private IPowerManager mPM;
+    
+    /** 
+     * The device keyguard manager to bypass the lock screen
+     */
+    private KeyguardManager mKeyguardManager;
+    
     private IJarvisPolicy mPolicy;
+    /** 
+     * Accelaration sensor to determine a shake for listening
+     */
     private Sensor mAccelerometer;
+    
+    /** 
+     * Broadcast receiver for installed services
+     */
     private BroadcastReceiver mReceiver;
     
+    /** 
+     * App Channel to communicate with the service 
+     */
     private AppChannel mChannel;
     
+    /**
+     * Recognizer for listening
+     */
     private GrammarRecognizer mRecognizer;
+    
+    /** 
+     * Map for all mapped words
+     */
     private GrammarMap mGrammar;
+    
     private Handler mMainHandler;
+    
+    /** 
+     * Vibrator for giving haptic feedback
+     */
     private Vibrator mVibrator;
     
-    //Now the specifi settings
+    /**
+     * Boolean value to indicate if we should listen on shake
+     */
     private boolean mOnShakeListen;
+    
+    /**
+     * The raw listen mode data that we get from
+     * the system settings
+     */
     private int mListenMode;
-    private boolean mListenSOn, mListenP, mListenEverytime;
+    
+    /**
+     * Boolean value to enable listening, when the
+     * screen is turned on
+     */
+    private boolean mListenSOn;
+    
+    /**
+     * Boolean value to enable listening, when the phone
+     * is plugged in. (when it is charging)
+     */
+    private boolean mListenP;
+    
+    /**
+     * Boolean value to enable listen everytime mode
+     */
+    private boolean mListenEverytime;
+    
+    /**
+     * The package name of the service, that should handle the 
+     * queries
+     */
     private String mServicePackage;
+    
+    /**
+     * The service name that should handle all queries
+     */
     private String mServiceName;
+    
+    /**
+     * The shake threshold that will be used to determine
+     * if we should start listening <br>
+     * When this value is 0 on shake listening will be 
+     * disabled
+     */
     private int mShakeThreshold;
+    
+    /**
+     * Long value for the last change that was done for the words
+     * from the service
+     */
     private long mLastChange;
+    
     private SharedPreferences mPreferences;
+    
     private ActionProvider mAProvider;
+    
+    /**
+     * Indicator to show in which listen state
+     * we are. So if the service is disabled,
+     * listening or just in idle mode
+     */
     private State mState;
+    
+    /**
+     * Boolean value to indicate if we are listening
+     */
     private boolean mIsListening;
+    
+    /** 
+     * long value till when we want to block listening <br>
+     * relative to {@link #SystemClock.uptimeMillis()}
+     */
     private long mBlockTill;
+    
+    /**
+     * Boolean value to indicate if we successfully added
+     * the acceleration sensor listener
+     */
+    private boolean mAddedAcceleratorListener;
 
     private static final void log(String s) {
         if(DEBUG)
@@ -296,6 +415,10 @@ public class JarvisService extends IJarvisService.Stub {
         mMainThread = new WorkerThread("JarvisServiceThread");
         mAProvider = new ActionProvider(con, this);
         
+        //Get the power manager and keyguard manager
+        mPM = IPowerManager.Stub.asInterface(ServiceManager.getService(Context.POWER_SERVICE));
+        mKeyguardManager = (KeyguardManager) con.getSystemService(Context.KEYGUARD_SERVICE);
+        
         //Init the settings:
         mOnShakeListen = true;
         mListenEverytime = false;
@@ -318,12 +441,14 @@ public class JarvisService extends IJarvisService.Stub {
             case IDLE:
                 log("Moving to state idle.");
                 enableListenEverytime(false);
-                enableShakeListener(true);
+                if(mOnShakeListen)
+                    enableShakeListener(true);
                 break;
             case LISTENING:
                 log("Moving to state listening");
                 enableListenEverytime(true);
-                enableShakeListener(true);
+                if(mOnShakeListen)
+                    enableShakeListener(true);
                 break;
         }
         mState = s;
@@ -360,11 +485,8 @@ public class JarvisService extends IJarvisService.Stub {
             }
         }
 
-        //Go through the events to reset settings and receivers
-        if(wasScreenOn) onScreenOn();
-        else onScreenOff();
-        if(isCharging) onPowerConnect();
-        else onPowerDisconnect();
+        if(shouldListen())
+            listen(false);
 
         //Now connected to new service
         if(newService && init()) {
@@ -492,7 +614,10 @@ public class JarvisService extends IJarvisService.Stub {
             mReceiver = new SettingsReceiver();
             mContext.registerReceiver(mReceiver, filter);
         }
-        onScreenOn();
+        
+        if(shouldListen())
+            listen(false);
+        
         return true;
     }
     
@@ -583,9 +708,11 @@ public class JarvisService extends IJarvisService.Stub {
         }
         if(mIsListening) {
             log("Couldn't listen because we are already listening.");
+            return;
         }
         if(!isConnectedToService()) {
             log("Couldn't listen because no Service is connected.");
+            return;
         }
         
         if(v)mVibrator.vibrate(200);
@@ -663,48 +790,31 @@ public class JarvisService extends IJarvisService.Stub {
 
     private void enableListenEverytime(boolean t) {
         mState = State.LISTENING;
-        listen(false);
+        
+        //In case we want to listen everytime, start at least one time!
+        if(t && !mIsListening)
+            listen(false);
     }
     
-    //Events that can occur
-    
-    private void onScreenOff() {
-        log("Turnend screen off.");
-        if(mListenP && isCharging) {
-            enableListenEverytime(true);
-        } else if (mListenEverytime) {
-            enableListenEverytime(true);
-        } else if(mListenSOn) {
-            enableListenEverytime(false);
-        }
-        if(mOnShakeListen)
-            enableShakeListener(isCharging);
-    }
-
-    private void onScreenOn() {
-        log("Turnend screen on.");
-        if(mListenSOn)
-            enableListenEverytime(true);
+    private void checkModes() {
+        if(shouldListen() && !mIsListening)
+            listen(false);
+        
         if(mOnShakeListen)
             enableShakeListener(true);
     }
     
-    private void onPowerDisconnect() {
-        log("Power disconnected. Checking modes.");
-        if ((wasScreenOn && mListenSOn) || mListenEverytime) {
-            enableListenEverytime(true);
-        } else {
-            enableListenEverytime(false);
-        }
-    }
-    
-    private void onPowerConnect() {
-        log("Power connected. Checking modes.");
-        if (mListenP) {
-            enableListenEverytime(true);
-        }
-        if(mOnShakeListen)
-            enableShakeListener(true);
+    private boolean shouldListen() {
+        if(isScreenOn() && mListenSOn)
+            return true;
+        
+        if(mListenEverytime)
+            return true;
+        
+        if(isCharging() && mListenP)
+            return true;
+        
+        return false;
     }
 
     private void onShake() {
@@ -735,37 +845,78 @@ public class JarvisService extends IJarvisService.Stub {
     };
 
     private void enableShakeListener(boolean b) {
+        if(b == mAddedAcceleratorListener)
+            return;
+        
         SensorManager sensorMgr = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
         //Remove the sensor listener if not needed, it will only keep the device active
         if(b && mOnShakeListen && mState != State.DISABLED) {
-            log("Trying to enable(" + b + ") ShakeListener -> register. The operation was " + 
-                    sensorMgr.registerListener(mShakeDetector, mAccelerometer, 
-                            SensorManager.SENSOR_DELAY_NORMAL));
+            mAddedAcceleratorListener = sensorMgr.registerListener(mShakeDetector, mAccelerometer, 
+                    SensorManager.SENSOR_DELAY_NORMAL);
+            log("Trying to enable(" + b + ") ShakeListener -> register. The operation was "
+                    + mAddedAcceleratorListener);
         } else if (!b) {
             log("Trying to enable(" + b + ") ShakeListener -> unregister.");
             sensorMgr.unregisterListener(mShakeDetector);
+            mAddedAcceleratorListener = false;
         }
     }
+    
+    private void wakeUpDevice() {
+        try {
+            mPM.wakeUp(SystemClock.uptimeMillis());
+        } catch (RemoteException e) {
+            //Not much we can do here..
+        }
+    }
+    
+    private void turnScreenOff() {
+        try {
+            mPM.goToSleep(SystemClock.uptimeMillis(), 0);
+        } catch (RemoteException e) {
+            //Not much we can do here..
+        }
+    }
+    
+    private boolean isScreenOn() {
+        try {
+            return mPM.isScreenOn();
+        } catch (RemoteException e) {
+        }
+        return false;
+    }
 
-    public static boolean wasScreenOn = true;
-    public static boolean isCharging = false;
+    private void wakeUpAndLaunch(String packagename, String actClass) {
+        wakeUpDevice();
+        
+        Intent intent = new Intent();
+        intent.setComponent(new ComponentName("com.example", "com.example.MyExampleActivity"));
+        if (!mKeyguardManager.isKeyguardSecure()) {
+            try {
+                // Dismiss the lock screen when Settings starts.
+                ActivityManagerNative.getDefault().dismissKeyguardOnNextActivity();
+            } catch (RemoteException e) {
+            }
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        
+        mContext.startActivity(intent);
+    }
+
+    private boolean isCharging() {
+        IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        Intent batteryStatus = mContext.registerReceiver(null, ifilter);
+        
+        // Are we charging / charged?
+        int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+        return status == BatteryManager.BATTERY_STATUS_CHARGING;
+    }
 
     public class SettingsReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (intent.getAction().equals(Intent.ACTION_SCREEN_OFF)) {
-                onScreenOff();
-                wasScreenOn = false;
-            } else if (intent.getAction().equals(Intent.ACTION_SCREEN_ON)) {
-                onScreenOn();
-                wasScreenOn = true;
-            } else if (intent.getAction().equals(Intent.ACTION_POWER_CONNECTED)) {
-                isCharging = true;
-                onPowerConnect();
-            } else if (intent.getAction().equals(Intent.ACTION_POWER_DISCONNECTED)) {
-                isCharging = false;
-                onPowerDisconnect();
-            }
+            checkModes();
         }
     }
 
