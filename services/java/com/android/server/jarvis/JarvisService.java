@@ -140,34 +140,33 @@ public class JarvisService extends IJarvisService.Stub {
                 Bundle result = results.get(0);
                 log("Got something: " + result.getString(GrammarRecognizer.KEY_LITERAL) + " -> " + result.getString(GrammarRecognizer.KEY_MEANING) + " : " + result.getString(GrammarRecognizer.KEY_CONFIDENCE));
 
-                //First check for the right state. If we are in idle mode we will send the results directly to the service
-                if(mState != State.IDLE) {
-                    //Strings are in format: 0[literal]
-                    //                       1[meaning]
-                    //                       2[confidence]
-                    ArrayList<String>list = new ArrayList<String>();
-                    list.add(result.getString(GrammarRecognizer.KEY_LITERAL, ""));
-                    list.add(result.getString(GrammarRecognizer.KEY_MEANING, ""));
-                    list.add(result.getString(GrammarRecognizer.KEY_CONFIDENCE, ""));
-
-                    //Check if the confidence is higher than the min confidence
-                    int con = Integer.parseInt(list.get(2));
-                    if(con > MIN_CONFIDENCE) {
-                        if(mChannel != null && mChannel.isConnected())
-                            mChannel.sendString(list);
-                    } else {
-                        log("Confidence was too low to be a valid result confidence='" + con + "'");
-                    }
-                } else {
-                    String meaning = result.getString(GrammarRecognizer.KEY_MEANING, "");
-                    if(meaning.equals(DEFAULT_NAME)) {
-                        moveToState(State.LISTENING, null);
-
+                String meaning = result.getString(GrammarRecognizer.KEY_MEANING, "");
+                if(meaning.contains(DEFAULT_NAME)) {
+                    if(!isScreenOn()) {
+                        log("We are waking the device from sleeping.");
                         wakeUpDevice();
-                        
-                        //Parse again to make sure the service gets notified as-well
-                        onRecognitionSuccess(results);
                     }
+                    
+                    if(mKeyguardManager.isKeyguardLocked()) {
+                        ActivityManagerNative.getDefault().dismissKeyguardOnNextActivity();
+                    }
+                }
+                
+                //Strings are in format: 0[literal]
+                //                       1[meaning]
+                //                       2[confidence]
+                ArrayList<String>list = new ArrayList<String>();
+                list.add(result.getString(GrammarRecognizer.KEY_LITERAL, ""));
+                list.add(result.getString(GrammarRecognizer.KEY_MEANING, ""));
+                list.add(result.getString(GrammarRecognizer.KEY_CONFIDENCE, ""));
+
+                //Check if the confidence is higher than the min confidence
+                int con = Integer.parseInt(list.get(2));
+                if(con > MIN_CONFIDENCE) {
+                    if(mChannel != null && mChannel.isConnected())
+                        mChannel.sendString(list);
+                } else {
+                    log("Confidence was too low to be a valid result confidence='" + con + "'");
                 }
             } catch (Exception ex) {
                 log("Failed to parse result of recognizing.", ex);
@@ -187,9 +186,9 @@ public class JarvisService extends IJarvisService.Stub {
         }
 
         private void resetListening() {
+            mIsListening = false;
             if(shouldListen())
                 listen(false);
-            mIsListening = false;
         }
 
         @Override
@@ -217,26 +216,30 @@ public class JarvisService extends IJarvisService.Stub {
 
         @Override
         public void onChange(boolean selfChange) {
+            final int userID = ActivityManager.getCurrentUser();
             mShakeThreshold =
                     Settings.System.getIntForUser(mContext.getContentResolver(),
                             Settings.System.JARVIS_SERVICE_SHAKE_THRESHOLD, SHAKE_THRESHOLD,
-                            ActivityManager.getCurrentUser());
+                            userID);
             mOnShakeListen = mShakeThreshold > 0; 
             mListenMode =
                     Settings.System.getIntForUser(mContext.getContentResolver(),
                             Settings.System.JARVIS_SERVICE_LISTEN_WAKE_UP, 3,
-                            ActivityManager.getCurrentUser());
+                            userID);
             mListenSOn = (mListenMode & 1) == 1;
             mListenP = (mListenMode & 2) == 2;
             mListenEverytime = (mListenMode & 4) == 4;
-            String service =
-                    Settings.System.getStringForUser(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_KEYS, ActivityManager.getCurrentUser());
-            int m = Settings.System.getIntForUser(mContext.getContentResolver(), Settings.System.JARVIS_SERVICE_LISTEN_LOCK, 1, ActivityManager.getCurrentUser());
+            
+            String service = Settings.System.getStringForUser(mContext.getContentResolver(),
+                    Settings.System.JARVIS_SERVICE_KEYS, userID);
+            int m = Settings.System.getIntForUser(mContext.getContentResolver(),
+                    Settings.System.JARVIS_SERVICE_LISTEN_LOCK, 1, userID);
             switch(m) {
                 case 0: moveToState(State.LISTENING, null); break;
                 case 1: moveToState(State.IDLE, null); break;
                 case 2: moveToState(State.DISABLED, null); break;
             }
+            
             if(service != null) {
                 String[] c = service.split(";");
                 if(c.length == 2) {
@@ -244,6 +247,7 @@ public class JarvisService extends IJarvisService.Stub {
                     mServiceName = c[1];
                 }
             }
+            
             if (!selfChange) {
                 resetSettings();
             }
@@ -508,6 +512,14 @@ public class JarvisService extends IJarvisService.Stub {
         mObserver = new SettingsObserver(mMainHandler);
         mObserver.observe();
         mObserver.onChange(false);
+        
+        try {
+            while(ActivityManagerNative.getDefault().getCurrentUser() == null) {
+                Thread.sleep(25);
+            }
+        } catch (Exception ex) {
+            log("Failed to wait till there is a valid user.", ex);
+        }
         
         if(isAppInstalled(mServicePackage)) {
             //We have the support app installed so proceed

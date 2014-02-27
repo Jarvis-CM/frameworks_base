@@ -3491,9 +3491,9 @@ public final class Settings {
 
         /**
          * Place a listen lock with this config
-         * 0 - No listen lock (Mode listening)
-         * 1 - Disabled, except direct call (Mode Idle)
-         * 2 - Disabled completly (Mode disabled)
+         * 0 - No listen lock (Mode listening) <br>
+         * 1 - Disabled, except direct call (Mode Idle) <br>
+         * 2 - Disabled completly (Mode disabled) <br>
          * @hide
          */
         public static final String JARVIS_SERVICE_LISTEN_LOCK = "jarvis_service_listen_lock";
