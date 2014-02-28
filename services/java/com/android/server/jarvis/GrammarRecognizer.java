@@ -35,7 +35,6 @@ import android.os.Bundle;
 import android.speech.srec.MicrophoneInputStream;
 import android.speech.srec.Recognizer;
 import android.speech.srec.Recognizer.Grammar;
-import android.util.Config;
 import android.util.Log;
 
 /**
@@ -200,8 +199,11 @@ public class GrammarRecognizer {
             mic = null;
 
             try {
-                if (mSrec != null && recognizerStarted)
+                if (mSrec != null && recognizerStarted) {
                     mSrec.stop();
+                    if(mListener != null)
+                        mListener.onRecognizerFinished();
+                }
             } catch (IllegalStateException e) {
                 Log.e(TAG, e.toString());
           }
@@ -239,6 +241,8 @@ public class GrammarRecognizer {
         public void onRecognitionError(String reason);
 
         public void onVoiceEnded();
+        
+        public void onRecognizerFinished();
     }
 
     public static class GrammarMap {

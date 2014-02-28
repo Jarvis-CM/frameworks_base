@@ -171,29 +171,29 @@ public class JarvisService extends IJarvisService.Stub {
             } catch (Exception ex) {
                 log("Failed to parse result of recognizing.", ex);
             }
-            resetListening();
+            mIsListening = false;
         }
 
         @Override
         public void onRecognitionFailure() {
-            resetListening();
+            mIsListening = false;
         }
 
         @Override
         public void onRecognitionError(String reason) {
-            resetListening();
-            log("Failed to listen: " + reason);
-        }
-
-        private void resetListening() {
             mIsListening = false;
-            if(shouldListen())
-                listen(false);
+            log("Failed to listen: " + reason);
         }
 
         @Override
         public void onVoiceEnded() {
             //Will be used later
+        }
+
+        @Override
+        public void onRecognizerFinished() {
+            if(shouldListen())
+                listen(false);
         }
     }; //End of grammar listener
     
@@ -309,6 +309,8 @@ public class JarvisService extends IJarvisService.Stub {
      */
     private Vibrator mVibrator;
     
+    private VolumeThresholdSensor mVolumeListener;
+    
     /**
      * Boolean value to indicate if we should listen on shake
      */
@@ -422,6 +424,10 @@ public class JarvisService extends IJarvisService.Stub {
         //Get the power manager and keyguard manager
         mPM = IPowerManager.Stub.asInterface(ServiceManager.getService(Context.POWER_SERVICE));
         mKeyguardManager = (KeyguardManager) con.getSystemService(Context.KEYGUARD_SERVICE);
+        
+        mVolumeListener = new VolumeThresholdSensor();
+        //TODO: We need a listener to make sure we don't need to listen
+        //      everytime through the recognizer
         
         //Init the settings:
         mOnShakeListen = true;
