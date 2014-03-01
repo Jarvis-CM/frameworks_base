@@ -201,13 +201,13 @@ public class GrammarRecognizer {
             try {
                 if (mSrec != null && recognizerStarted) {
                     mSrec.stop();
-                    if(mListener != null)
-                        mListener.onRecognizerFinished();
                 }
             } catch (IllegalStateException e) {
                 Log.e(TAG, e.toString());
           }
         }
+        if(mListener != null)
+            mListener.onRecognizerFinished();
     }
 
     private void onRecognitionSuccess() throws InterruptedException {

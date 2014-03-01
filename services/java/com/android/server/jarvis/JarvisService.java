@@ -82,20 +82,14 @@ public class JarvisService extends IJarvisService.Stub {
     private static final int MIN_CONFIDENCE = 500;
 
     /** That is my own support package */
-    private static final String PACKAGE_NAME = "de.firtecy.jarvisbasic";
+    private static final String PACKAGE_NAME = "de.firtecy.voiceredirectgoogle";
     /** and the connected service */
-    private static final String PACKAGE_SERVICE_NAME = "de.firtecy.jarvisbasic.JarvisService";
+    private static final String PACKAGE_SERVICE_NAME = "de.firtecy.voiceredirectgoogle.ProxyService";
     
     private static final String DEFAULT_NAME = "Jarvis";
     private static final String DEFAULT_SLOT = "@Name";
     private static final String BASE_G2G_FILE = "/system/usr/srec/config/en.us/grammars/grammar_base.g2g";
     //Now all properties have finished
-
-    public static enum State {
-        DISABLED,
-        IDLE,
-        LISTENING
-    }
 
     private static ComponentName sServiceComponentName;
     public static final ComponentName getServiceComponentName() {
@@ -139,18 +133,6 @@ public class JarvisService extends IJarvisService.Stub {
             try {
                 Bundle result = results.get(0);
                 log("Got something: " + result.getString(GrammarRecognizer.KEY_LITERAL) + " -> " + result.getString(GrammarRecognizer.KEY_MEANING) + " : " + result.getString(GrammarRecognizer.KEY_CONFIDENCE));
-
-                String meaning = result.getString(GrammarRecognizer.KEY_MEANING, "");
-                if(meaning.contains(DEFAULT_NAME)) {
-                    if(!isScreenOn()) {
-                        log("We are waking the device from sleeping.");
-                        wakeUpDevice();
-                    }
-                    
-                    if(mKeyguardManager.isKeyguardLocked()) {
-                        ActivityManagerNative.getDefault().dismissKeyguardOnNextActivity();
-                    }
-                }
                 
                 //Strings are in format: 0[literal]
                 //                       1[meaning]
@@ -163,8 +145,20 @@ public class JarvisService extends IJarvisService.Stub {
                 //Check if the confidence is higher than the min confidence
                 int con = Integer.parseInt(list.get(2));
                 if(con > MIN_CONFIDENCE) {
+                    String meaning = result.getString(GrammarRecognizer.KEY_MEANING, "");
+                    if(meaning.contains(DEFAULT_NAME)) {
+                        if(!isScreenOn()) {
+                            log("We are waking the device from sleeping.");
+                            wakeUpDevice();
+                        }
+                        
+                        if(mKeyguardManager.isKeyguardLocked()) {
+                            ActivityManagerNative.getDefault().dismissKeyguardOnNextActivity();
+                        }
+                    }
+                    
                     if(mChannel != null && mChannel.isConnected())
-                        mChannel.sendString(list);
+                        mBlockFromService = mChannel.onReceivedWakeUp(list.get(1));
                 } else {
                     log("Confidence was too low to be a valid result confidence='" + con + "'");
                 }
@@ -211,7 +205,7 @@ public class JarvisService extends IJarvisService.Stub {
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.JARVIS_SERVICE_SHAKE_THRESHOLD), false, this);
             resolver.registerContentObserver(Settings.System.getUriFor(
-                    Settings.System.JARVIS_SERVICE_LISTEN_LOCK), false, this);
+                    Settings.System.JARVIS_SERVICE_LISTEN_ENABLED), false, this);
         }
 
         @Override
@@ -230,15 +224,11 @@ public class JarvisService extends IJarvisService.Stub {
             mListenP = (mListenMode & 2) == 2;
             mListenEverytime = (mListenMode & 4) == 4;
             
+            mIsEnabled = Settings.System.getIntForUser(mContext.getContentResolver(),
+                    Settings.System.JARVIS_SERVICE_LISTEN_ENABLED, 1, userID) == 1;
+            
             String service = Settings.System.getStringForUser(mContext.getContentResolver(),
                     Settings.System.JARVIS_SERVICE_KEYS, userID);
-            int m = Settings.System.getIntForUser(mContext.getContentResolver(),
-                    Settings.System.JARVIS_SERVICE_LISTEN_LOCK, 1, userID);
-            switch(m) {
-                case 0: moveToState(State.LISTENING, null); break;
-                case 1: moveToState(State.IDLE, null); break;
-                case 2: moveToState(State.DISABLED, null); break;
-            }
             
             if(service != null) {
                 String[] c = service.split(";");
@@ -297,11 +287,6 @@ public class JarvisService extends IJarvisService.Stub {
      */
     private GrammarRecognizer mRecognizer;
     
-    /** 
-     * Map for all mapped words
-     */
-    private GrammarMap mGrammar;
-    
     private Handler mMainHandler;
     
     /** 
@@ -340,6 +325,11 @@ public class JarvisService extends IJarvisService.Stub {
     private boolean mListenEverytime;
     
     /**
+     * Boolean value to indicate if the service is enabled or not
+     */
+    private boolean mIsEnabled;
+    
+    /**
      * The package name of the service, that should handle the 
      * queries
      */
@@ -359,38 +349,21 @@ public class JarvisService extends IJarvisService.Stub {
     private int mShakeThreshold;
     
     /**
-     * Long value for the last change that was done for the words
-     * from the service
-     */
-    private long mLastChange;
-    
-    private SharedPreferences mPreferences;
-    
-    private ActionProvider mAProvider;
-    
-    /**
-     * Indicator to show in which listen state
-     * we are. So if the service is disabled,
-     * listening or just in idle mode
-     */
-    private State mState;
-    
-    /**
      * Boolean value to indicate if we are listening
      */
     private boolean mIsListening;
-    
-    /** 
-     * long value till when we want to block listening <br>
-     * relative to {@link #SystemClock.uptimeMillis()}
-     */
-    private long mBlockTill;
     
     /**
      * Boolean value to indicate if we successfully added
      * the acceleration sensor listener
      */
     private boolean mAddedAcceleratorListener;
+    
+    /**
+     * Boolean value to indicate if the service blocks all
+     * inputs
+     */
+    private boolean mBlockFromService;
 
     private static final void log(String s) {
         if(DEBUG)
@@ -404,10 +377,8 @@ public class JarvisService extends IJarvisService.Stub {
     
     public JarvisService(Context con, Handler wmHandler) {
         mContext = con;
-        mState = State.DISABLED;
         mChannel = null;
         mMainHandler = null;
-        mGrammar = new GrammarMap();
         //Used for detection
         mAccelerometer = ((SensorManager)mContext.getSystemService(Context.SENSOR_SERVICE))
                 .getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
@@ -419,7 +390,6 @@ public class JarvisService extends IJarvisService.Stub {
         }
         log("Created Jarvis Service");
         mMainThread = new WorkerThread("JarvisServiceThread");
-        mAProvider = new ActionProvider(con, this);
         
         //Get the power manager and keyguard manager
         mPM = IPowerManager.Stub.asInterface(ServiceManager.getService(Context.POWER_SERVICE));
@@ -437,31 +407,6 @@ public class JarvisService extends IJarvisService.Stub {
         mServicePackage = PACKAGE_NAME;
         mServiceName = PACKAGE_SERVICE_NAME;
         mShakeThreshold = SHAKE_THRESHOLD;
-        mPreferences = mContext.getSharedPreferences(DEFAULT_NAME, 0);
-        mLastChange = mPreferences.getLong("last_checked_words", -1);
-    }
-
-    protected void moveToState(State s, Bundle data) {
-        switch(s) {
-            case DISABLED:
-                log("Moving to state disabled.");
-                enableListenEverytime(false);
-                enableShakeListener(false);
-                break;
-            case IDLE:
-                log("Moving to state idle.");
-                enableListenEverytime(false);
-                if(mOnShakeListen)
-                    enableShakeListener(true);
-                break;
-            case LISTENING:
-                log("Moving to state listening");
-                enableListenEverytime(true);
-                if(mOnShakeListen)
-                    enableShakeListener(true);
-                break;
-        }
-        mState = s;
     }
     
     /**
@@ -479,6 +424,17 @@ public class JarvisService extends IJarvisService.Stub {
     private void resetSettings() {
         log("Resetting settings.");
         boolean newService = false;
+        
+        if(!mIsEnabled) {
+            disable();
+            return;
+        }
+        
+        if(mOnShakeListen && !mAddedAcceleratorListener)
+            enableShakeListener(true);
+        else if(!mOnShakeListen && mAddedAcceleratorListener)
+            enableShakeListener(false);
+        
         if(mChannel != null) {
             ComponentName c = mChannel.getComponentName();
             if(!(c.getPackageName().equals(mServicePackage) 
@@ -493,14 +449,29 @@ public class JarvisService extends IJarvisService.Stub {
                 }
                 mChannel = null;
             }
-        }
-
-        if(shouldListen())
-            listen(false);
+        } else newService = true;
 
         //Now connected to new service
         if(newService && init()) {
             log("Successful switched to new service.");
+        }
+        
+        if(shouldListen())
+            listen(false);
+    }
+    
+    private void disable() {
+        if(isConnectedToService()) {
+            try {
+                mChannel.disconnect();
+            } catch (RemoteException ex) {
+                log("Failed to disconnect from service", ex);
+            }
+            mChannel = null;
+        }
+        
+        if(mAddedAcceleratorListener) {
+            enableShakeListener(false);
         }
     }
     
@@ -517,12 +488,13 @@ public class JarvisService extends IJarvisService.Stub {
         //Look for settings changes
         mObserver = new SettingsObserver(mMainHandler);
         mObserver.observe();
-        mObserver.onChange(false);
         
         try {
             while(ActivityManagerNative.getDefault().getCurrentUser() == null) {
                 Thread.sleep(25);
             }
+            //Wait a bit...
+            Thread.sleep(25);
         } catch (Exception ex) {
             log("Failed to wait till there is a valid user.", ex);
         }
@@ -530,24 +502,17 @@ public class JarvisService extends IJarvisService.Stub {
         if(isAppInstalled(mServicePackage)) {
             //We have the support app installed so proceed
             log("Service package is installed. package=" + mServicePackage);
-            if(init())
-                return;//We succeded and shouldn't continue
         }
         
-        //This means there is no package installed. So look if we get a compatible package
-        log("Service package is not installed. package=" + mServicePackage);
-        IntentFilter intentFilter = new IntentFilter();
-        intentFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
-        intentFilter.addDataScheme("package");
-        mContext.registerReceiver(new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if(isAppInstalled(mServicePackage)) {
-                    if(init())//If it was successful we can remove the receiver
-                        mContext.unregisterReceiver(this);
-                }
-            }
-        }, intentFilter);
+        if(mReceiver == null) {
+            IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+            filter.addAction(Intent.ACTION_SCREEN_OFF);
+            filter.addAction(Intent.ACTION_POWER_CONNECTED);
+            filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+            filter.addAction(Intent.ACTION_BOOT_COMPLETED);
+            mReceiver = new SettingsReceiver();
+            mContext.registerReceiver(mReceiver, filter);
+        }
     }
     
     /**
@@ -585,6 +550,11 @@ public class JarvisService extends IJarvisService.Stub {
         
         File base = getBaseOrCopy();
 
+        if(base == null || !base.exists()) {
+            log("There is no valid grammar file avaible.");
+            return false;
+        }
+        
         //Now start binding with the service
         log("Connecting to service " + mServiceName + " in package " + mServicePackage);
         mChannel = new AppChannel(mContext, mServicePackage, mServiceName, mMainHandler);
@@ -601,112 +571,23 @@ public class JarvisService extends IJarvisService.Stub {
         }
         
         try {
-            final long start = SystemClock.uptimeMillis();
-            //Wait till the service is ready, but kill it when it needs to long. > SERVICE_NOT_READY_TIMEOUT in s
-            while(!mChannel.isReady()) {
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException ex){}
-                if((SystemClock.uptimeMillis() - start) > SERVICE_NOT_READY_TIMEOUT * 1000) {
-                    mChannel.disconnect();
-                    mChannel = null;
-                    throw new RemoteException("Service took to long to get ready. Over " + SERVICE_NOT_READY_TIMEOUT + " s.");
-                }
-            }
-            log("Now connected to service that is ready. (Took " + (SystemClock.uptimeMillis() - start) + " ms)");
+            //We are waiting a bit..
+            Thread.sleep(20);
             sServiceComponentName = mChannel.getComponentName();
-            log("Service targets API: " + mChannel.getTargetApi() + " framework supports " + Build.JARVIS_VERSION);
         } catch (Exception ex) {
             log("Catched a remote exception while waiting till Service is ready. Cancel.", ex);
             return false;
         }
-        
-        if(!lookForUpdate(base))
+        try {
+            mRecognizer.loadGrammar(base);
+        } catch (IOException ex) {
+            log("Failed to load grammar.", ex);
             return false;
-        
-        if(mReceiver == null) {
-            IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
-            filter.addAction(Intent.ACTION_SCREEN_OFF);
-            filter.addAction(Intent.ACTION_POWER_CONNECTED);
-            filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
-            mReceiver = new SettingsReceiver();
-            mContext.registerReceiver(mReceiver, filter);
         }
         
         if(shouldListen())
             listen(false);
         
-        return true;
-    }
-    
-    private boolean lookForUpdate(File base) {
-        File out = JarvisFileUtils.getSrecGrammarFile(mServiceName);
-        //The last update of words from the service
-        long last = mChannel.getLastUpdate();
-        
-        final int length = mChannel.getCountWords();
-        int num = mPreferences.getInt("last_count", -1);
-        
-        boolean update = mLastChange < last || length != num;
-        if(!update && out.exists()) log("We don't have to update.");
-        else update = true;
-        
-        if(update) {//If we need an update add all words again
-            mPreferences.edit().putLong("last_checked_words", last).commit();
-            //Predefined words
-            mGrammar.addWord(DEFAULT_SLOT, DEFAULT_NAME, null, 1, "V='Jarvis'");
-            mGrammar.addWord(DEFAULT_SLOT, "Okay", null, 1, "V='ok'");
-            mGrammar.addWord(DEFAULT_SLOT, "Ok", null, 1, "V='ok'");
-            mGrammar.addWord(DEFAULT_SLOT, "Okay " + DEFAULT_NAME, null, 1, "V='Jarvis'");
-            log("Now fetching words from service.");
-
-            final long start = SystemClock.uptimeMillis();
-            num = 0;
-            int i = 0;
-            //Loop through all words from service
-            for(;i < length;i++) {
-                try {
-                    String t = mChannel.getWordAt(i);
-                    if(t == null || t.length() == 0) {
-                        log("Word at position " + i + " had no content. Skipping. " + t);
-                        continue;
-                    }
-                    String[] s = t.split(";");
-                    //Stored as: [slot];[word];[pron];[literal];[priority]
-                    if(s.length == 5 && s[1] != null && s[1].length() > 0) {
-                        String word = s[1];
-                        String pron = s[2];
-                        if(pron != null && pron.length() == 0)
-                            pron = null;
-                        String literal = "V='";
-                        if(s[3] != null && s[3].length() > 0)
-                            literal += s[3];
-                        else literal += word.toLowerCase();
-                        literal += "'";
-
-                        //Now add it to the grammar
-                        mGrammar.addWord(DEFAULT_SLOT, word, pron, 5, literal);
-                        log("Added word: " + word + " from '" + t + "'");
-                        num++;
-                    } else {
-                        log("Word at position " + i + " had wrong format('" + t + "') Skipping.");
-                    }
-                } catch (Exception ex) {
-                    log("Failed to fetch word at: " + i, ex);
-                }
-            }
-            mPreferences.edit().putInt("last_count", num).commit();
-            log("Fetched " + num + " words from total count of " + i + ". (Took " + (SystemClock.uptimeMillis() - start) + " ms)");
-        }
-        try {
-            if(update)
-                mRecognizer.compileGrammar(mGrammar, base, out);
-            mRecognizer.loadGrammar(out);
-            log("Saved grammar to " + out.getAbsolutePath());
-        } catch (Exception ex) {
-            log("Failed to compile command grammar.", ex);
-            return false;
-        }
         return true;
     }
 
@@ -716,12 +597,12 @@ public class JarvisService extends IJarvisService.Stub {
      * @param boolean If we should vibrate to send feedback
      */
     private synchronized void listen(boolean v) {
-        if(mState == State.DISABLED) {
-            log("Couldn't listen because we are in Disabled Mode.");
+        if(!mIsEnabled) {
+            log("Couldn't listen because the service is disabled.");
             return;
         }
-        if(isBlocked()) {
-            log("Couldn't listen because we are blocked till: " + mBlockTill);
+        if(mBlockFromService) {
+            log("Couldn't listen because we are blocked from service");
             return;
         }
         if(mIsListening) {
@@ -749,26 +630,9 @@ public class JarvisService extends IJarvisService.Stub {
         if(mIsListening && mRecognizer != null) {
             mRecognizer.stop();
         }
-        if(mState != State.DISABLED) {
-            moveToState(State.IDLE, null);
-        }
+        mIsListening = false;
     }
     
-    /**
-     * When we receive a query from the service, this method will handle the query
-     */
-    private void queryAction(final int action, Bundle data) {
-        try {
-            switch(action) {
-                case JarvisConstants.TOGGLE_LAST_APP:
-                    mAProvider.toggleLastApp();
-                    break;
-            }
-        } catch (Throwable t) {
-            log("Failed to execute action " + action, t);
-        }
-    }
-
     //TODO: implement v
     public boolean hasJarvisService() {
          return true;
@@ -807,8 +671,6 @@ public class JarvisService extends IJarvisService.Stub {
     }
 
     private void enableListenEverytime(boolean t) {
-        mState = State.LISTENING;
-        
         //In case we want to listen everytime, start at least one time!
         if(t && !mIsListening)
             listen(false);
@@ -823,6 +685,12 @@ public class JarvisService extends IJarvisService.Stub {
     }
     
     private boolean shouldListen() {
+        if(!mIsEnabled)
+            return false;
+        
+        if(mBlockFromService)
+            return false;
+        
         if(isScreenOn() && mListenSOn)
             return true;
         
@@ -838,29 +706,21 @@ public class JarvisService extends IJarvisService.Stub {
     private void onShake() {
         listen();
     }
+    
 
-    private boolean isBlocked() {
-        return mBlockTill > SystemClock.uptimeMillis(); 
+    void blockFromService() {
+        log("Service set a block.");
+        mBlockFromService = true;
     }
 
-    private void setBlock(long till) {
-        log("Block queried till=" + till + " now we are at " + SystemClock.uptimeMillis());
-        mBlockTill = till;
-        if(till < SystemClock.uptimeMillis()) {
-            //reapply current state so we can be sure that all values get applied
-            moveToState(mState, null);             //min   sec  milli = 10 min
-        } else if(till > mBlockTill && till - SystemClock.uptimeMillis() < 10 * 60 * 1000) {
-            mMainHandler.removeCallbacks(mResetBlock);
-            mMainHandler.postDelayed(mResetBlock, till - SystemClock.uptimeMillis());
+    void releaseBlockFromService() {
+        log("Service tried to release the block.");
+        if(mBlockFromService) {
+            mBlockFromService = false;
+            if(shouldListen())
+                listen(false);
         }
     }
-
-    private final Runnable mResetBlock = new Runnable() {
-        @Override
-        public void run() {
-            mMainHandler.sendMessage(mMainHandler.obtainMessage(-1));
-        }
-    };
 
     private void enableShakeListener(boolean b) {
         if(b == mAddedAcceleratorListener)
@@ -868,7 +728,7 @@ public class JarvisService extends IJarvisService.Stub {
         
         SensorManager sensorMgr = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
         //Remove the sensor listener if not needed, it will only keep the device active
-        if(b && mOnShakeListen && mState != State.DISABLED) {
+        if(b && mOnShakeListen) {
             mAddedAcceleratorListener = sensorMgr.registerListener(mShakeDetector, mAccelerometer, 
                     SensorManager.SENSOR_DELAY_NORMAL);
             log("Trying to enable(" + b + ") ShakeListener -> register. The operation was "
@@ -908,7 +768,7 @@ public class JarvisService extends IJarvisService.Stub {
         wakeUpDevice();
         
         Intent intent = new Intent();
-        intent.setComponent(new ComponentName("com.example", "com.example.MyExampleActivity"));
+        intent.setComponent(new ComponentName(packagename, actClass));
         if (!mKeyguardManager.isKeyguardSecure()) {
             try {
                 // Dismiss the lock screen when Settings starts.
@@ -928,13 +788,39 @@ public class JarvisService extends IJarvisService.Stub {
         
         // Are we charging / charged?
         int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
-        return status == BatteryManager.BATTERY_STATUS_CHARGING;
+        return status == BatteryManager.BATTERY_STATUS_CHARGING
+                || status == BatteryManager.BATTERY_STATUS_FULL;
     }
 
     public class SettingsReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
-            checkModes();
+            if(Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+                log("Got boot up action.");
+                
+                mObserver.onChange(false);
+                
+                if(isAppInstalled(mServicePackage)) {
+                    //We have the support app installed so proceed
+                    log("Service package is installed. package=" + mServicePackage);
+                    return;
+                }
+                
+                //This means there is no package installed. So look if we get a compatible package
+                log("Service package is not installed. package=" + mServicePackage);
+                IntentFilter intentFilter = new IntentFilter();
+                intentFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
+                intentFilter.addDataScheme("package");
+                mContext.registerReceiver(new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        if(isAppInstalled(mServicePackage)) {
+                            if(init())//If it was successful we can remove the receiver
+                                mContext.unregisterReceiver(this);
+                        }
+                    }
+                }, intentFilter);
+            } else checkModes();
         }
     }
 
@@ -951,25 +837,11 @@ public class JarvisService extends IJarvisService.Stub {
         @Override 
         public void handleMessage(Message msg) {
             switch (msg.what) {
-                case -1:
-                    mService.setBlock(0);
+                case AppChannel.BUMP_ACQUIRE_BLOCK:
+                    mService.blockFromService();
                     break;
-                case AppChannel.BUMP_UPDATE_WORDS:
-                    mService.lookForUpdate(mService.getBaseOrCopy());
-                    break;
-                case AppChannel.BUMP_LISTEN:
-                    boolean b = (msg.obj instanceof Boolean 
-                            && ((Boolean)msg.obj).booleanValue());
-                    mService.listen(b);
-                    break;
-                case AppChannel.BUMP_STOP:
-                    mService.stop();
-                    break;
-                case AppChannel.BUMP_ACTION_QUERIED:
-                    mService.queryAction(msg.arg1, (Bundle)msg.obj);  
-                    break;
-                case AppChannel.BUMP_BLOCK_TILL:
-                    mService.setBlock(((Long)msg.obj).longValue());
+                case AppChannel.BUMP_RELEASE_BLOCK:
+                    mService.releaseBlockFromService();
                     break;
                 default:
                     super.handleMessage(msg);
@@ -995,7 +867,7 @@ public class JarvisService extends IJarvisService.Stub {
             mWorkerHandler.post(new Runnable(){
                 @Override
                 public void run() {
-                    new JarvisHandler(mWorkerHandler.getLooper(), JarvisService.this);
+                    mMainHandler = new JarvisHandler(mWorkerHandler.getLooper(), JarvisService.this);
                     prepare();
                 }
             });

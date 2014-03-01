@@ -3496,13 +3496,12 @@ public final class Settings {
         public static final String JARVIS_SERVICE_LISTEN_WAKE_UP = "jarvis_service_listen_wake_up";
 
         /**
-         * Place a listen lock with this config
-         * 0 - No listen lock (Mode listening) <br>
-         * 1 - Disabled, except direct call (Mode Idle) <br>
-         * 2 - Disabled completly (Mode disabled) <br>
+         * Config to enable or to disable the jarvis service<br>
+         * 0 -> Disabled <br>
+         * 1 -> Enabled
          * @hide
          */
-        public static final String JARVIS_SERVICE_LISTEN_LOCK = "jarvis_service_listen_lock";
+        public static final String JARVIS_SERVICE_LISTEN_ENABLED = "jarvis_service_listen_enabled";
 
         /**
          * Settings to backup. This is here so that it's in the same place as the settings

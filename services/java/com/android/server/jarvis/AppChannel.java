@@ -27,32 +27,29 @@ import android.os.IBinder;
 import android.os.Message;
 import android.os.RemoteException;
 import android.os.SystemClock;
-import android.speech.jarvis.IJarvis;
-import android.speech.jarvis.IJarvisCallback;
+import android.speech.jarvis.IWakeUpServiceCallback;
+import android.speech.jarvis.IWakeUpService;
 import android.util.Log;
 
 public class AppChannel {
     private static final String TAG = "AppChannel";
     
-    public static final int BUMP_UPDATE_WORDS   = 1;
-    public static final int BUMP_LISTEN         = 2;
-    public static final int BUMP_STOP           = 3;
-    public static final int BUMP_ACTION_QUERIED = 4;
-    public static final int BUMP_BLOCK_TILL     = 5;
+    public static final int BUMP_ACQUIRE_BLOCK  = 1;
+    public static final int BUMP_RELEASE_BLOCK  = 2;
     
     private ServiceConnection mConnection = new ServiceConnection() {
         // Called when the connection with the service is established
         public void onServiceConnected(ComponentName className, IBinder service) {
             // Following the example above for an AIDL interface,
-            // this gets an instance of the IJarvis, which we can use to call on the service
-            mIJarvisService = IJarvis.Stub.asInterface(service);
+            // this gets an instance of the IWakeUpService, which we can use to call on the service
+            mIWakeUpService = IWakeUpService.Stub.asInterface(service);
             mName = className;
             
             // We want to monitor the service for as long as we are
-            // connected to it. This will give the IJarvis service
+            // connected to it. This will give the IWakeUpService
             // a possibility to communicate to the remote (system server)
             try {
-                mIJarvisService.registerCallback(mCallback);
+                mIWakeUpService.registerCallback(mCallback);
             } catch (RemoteException e) {
                 // In this case the service has crashed before we could even
                 // do anything with it; we can count on soon being
@@ -64,10 +61,10 @@ public class AppChannel {
         // Called when the connection with the service disconnects unexpectedly
         public void onServiceDisconnected(ComponentName className) {
             Log.e(TAG, "Service has unexpectedly disconnected");
-            mIJarvisService = null;
+            mIWakeUpService = null;
         }
     };
-    private IJarvis mIJarvisService;
+    private IWakeUpService mIWakeUpService;
     private Context mContext;
     private Intent mStartIntent;
     private ComponentName mName;
@@ -75,7 +72,7 @@ public class AppChannel {
     
     public AppChannel(Context con, String packageName, String serviceAddress, Handler h) {
         mContext = con;
-        mIJarvisService = null;
+        mIWakeUpService = null;
         mStartIntent = new Intent();
         mStartIntent.setComponent(new ComponentName(packageName, serviceAddress));
         mStartIntent.setAction(Intent.ACTION_JARVIS_VOICE_CONTROL);
@@ -91,58 +88,28 @@ public class AppChannel {
     }
     
     public boolean isConnected() {
-        return mIJarvisService != null;
+        return mIWakeUpService != null;
     }
     
     public void connect() {
-        if(mIJarvisService == null) {
+        if(mIWakeUpService == null) {
             mContext.bindService(mStartIntent, mConnection, Context.BIND_AUTO_CREATE);
         }
     }
     
     public void disconnect() throws RemoteException {
-        if(mIJarvisService != null) {
-            mIJarvisService.unregisterCallback(mCallback);
+        if(mIWakeUpService != null) {
+            mIWakeUpService.unregisterCallback(mCallback);
             mContext.unbindService(mConnection);
         }
     }
     
-    public int getTargetApi() throws RemoteException {
-        if(isConnected()) {
-            return mIJarvisService.getTargetedApi();
-        } else return -1;
-    }
-    
-    public void sendString(List<String> list) throws RemoteException {
-        if(isReady()) {
-            mIJarvisService.handleStrings(list);
-        }
-    }
-    
-    public long getLastUpdate() {
-        long l = -1;
+    public boolean onReceivedWakeUp(String input) {
         try {
-            l = mIJarvisService.getLastChange();
-        } finally {
-            return l;
+            return mIWakeUpService.onReceivedWakeUp(input);
+        } catch (RemoteException ex) {
+            return false;
         }
-    }
-    
-    public String getWordAt(int i) throws RemoteException {
-        return mIJarvisService.getWordAt(i);
-    }
-    
-    public int getCountWords() {
-        int i = -1;
-        try {
-            i = mIJarvisService.getCountWords();
-        } finally {
-            return i;
-        }
-    }
-    
-    public boolean isReady() throws RemoteException {
-        return isConnected() && mIJarvisService.isReady();
     }
     
     /* Callbacks from remote service */
@@ -150,36 +117,13 @@ public class AppChannel {
      * This implementation is used to receive callbacks from the remote
      * service.
      */
-    private IJarvisCallback mCallback = new IJarvisCallback.Stub() {
-        /*
-         * This is called by the remote service regularly to tell us about
-         * new words. Note that IPC calls are dispatched through a thread
-         * pool running in each process, so the code executing here will
-         * NOT be running in our main thread like most other things -- so,
-         * to update the service, we need to use a Handler to hop over there.
-         */
-        public void newWordsAvailable(long since) {
-            mHandler.sendMessage(mHandler.obtainMessage(BUMP_UPDATE_WORDS, new Long(since)));
-        }
-        
-        public void listen(long when, boolean b) {
-            if(when < SystemClock.uptimeMillis())
-                mHandler.sendMessage(mHandler.obtainMessage(BUMP_LISTEN, new Boolean(b)));
-            else mHandler.sendMessageAtTime(mHandler.obtainMessage(BUMP_LISTEN, new Boolean(b)), when);
-        }
-        
-        public void stop(long when) {
-            if(when < SystemClock.uptimeMillis())
-                mHandler.sendMessage(mHandler.obtainMessage(BUMP_STOP, null));
-            else mHandler.sendMessageAtTime(mHandler.obtainMessage(BUMP_STOP, null), when);
+    private IWakeUpServiceCallback mCallback = new IWakeUpServiceCallback.Stub() {
+        public void acquireBlock() {
+           mHandler.sendEmptyMessage(BUMP_ACQUIRE_BLOCK);
         }
 
-        public void queryAction(int action, Bundle data) {
-            mHandler.sendMessage(mHandler.obtainMessage(BUMP_ACTION_QUERIED, action, 0, data));
-        }
-        
-        public void blockTill(long when) {
-            mHandler.sendMessage(mHandler.obtainMessage(BUMP_BLOCK_TILL, new Long(when)));
+        public void releaseBlock() {
+            mHandler.sendEmptyMessage(BUMP_RELEASE_BLOCK);
         }
     };
 }
