@@ -24,6 +24,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.content.pm.ThemeUtils;
 import android.content.res.Resources;
 import android.hardware.usb.UsbManager;
 import android.net.ConnectivityManager;
@@ -48,7 +49,6 @@ import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.Log;
 
-import com.android.internal.app.ThemeUtils;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.util.IState;
@@ -202,10 +202,13 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
         IBinder b = ServiceManager.getService(Context.CONNECTIVITY_SERVICE);
         IConnectivityManager cm = IConnectivityManager.Stub.asInterface(b);
         try {
-            int activeNetType = cm.getActiveNetworkInfo().getType();
-            for (int i : ifaceTypes) {
-                if(i == activeNetType) {
-                    upstreamIfaceTypes.add(new Integer(i));
+            NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+            if (networkInfo != null) {
+                int activeNetType = networkInfo.getType();
+                for (int i : ifaceTypes) {
+                    if(i == activeNetType) {
+                        upstreamIfaceTypes.add(new Integer(i));
+                    }
                 }
             }
         } catch (Exception e) {

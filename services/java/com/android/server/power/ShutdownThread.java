@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+ * Not a Contribution.
  * Copyright (C) 2008 The Android Open Source Project
  * Copyright (C) 2013 The CyanogenMod Project
  *
@@ -16,6 +18,8 @@
  */
 
 package com.android.server.power;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import android.app.ActivityManagerNative;
 import android.app.AlertDialog;
@@ -44,8 +48,10 @@ import android.os.SystemVibrator;
 import android.os.storage.IMountService;
 import android.os.storage.IMountShutdownObserver;
 import android.provider.Settings;
+import android.telephony.MSimTelephonyManager;
 
 import com.android.internal.telephony.ITelephony;
+import com.android.internal.telephony.msim.ITelephonyMSim;
 
 import android.util.Log;
 import android.view.WindowManager;
@@ -82,6 +88,8 @@ public final class ShutdownThread extends Thread {
     
     private final Object mActionDoneSync = new Object();
     private boolean mActionDone;
+    private AtomicBoolean mModemDone = new AtomicBoolean(false);
+    private AtomicBoolean mMountServiceDone = new AtomicBoolean(false);
     private Context mContext;
     private PowerManager mPowerManager;
     private PowerManager.WakeLock mCpuWakeLock;
@@ -338,7 +346,7 @@ public final class ShutdownThread extends Thread {
 
     void actionDone() {
         synchronized (mActionDoneSync) {
-            mActionDone = true;
+            mActionDone = mMountServiceDone.get() && mModemDone.get();
             mActionDoneSync.notifyAll();
         }
     }
@@ -348,13 +356,6 @@ public final class ShutdownThread extends Thread {
      * Shuts off power regardless of radio and bluetooth state if the alloted time has passed.
      */
     public void run() {
-        BroadcastReceiver br = new BroadcastReceiver() {
-            @Override public void onReceive(Context context, Intent intent) {
-                // We don't allow apps to cancel this, so ignore the result.
-                actionDone();
-            }
-        };
-
         /*
          * Write a system property in case the system_server reboots before we
          * get to the actual hardware restart. If that happens, we'll retry at
@@ -372,31 +373,14 @@ public final class ShutdownThread extends Thread {
         if (mRebootSafeMode) {
             SystemProperties.set(REBOOT_SAFEMODE_PROPERTY, "1");
         }
-
+        // Shutdown radios.
+        shutdownRadios(MAX_RADIO_WAIT_TIME);
         Log.i(TAG, "Sending shutdown broadcast...");
 
         // First send the high-level shut down broadcast.
-        mActionDone = false;
         Intent intent = new Intent(Intent.ACTION_SHUTDOWN);
         intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
-        mContext.sendOrderedBroadcastAsUser(intent,
-                UserHandle.ALL, null, br, mHandler, 0, null, null);
-        
-        final long endTime = SystemClock.elapsedRealtime() + MAX_BROADCAST_TIME;
-        synchronized (mActionDoneSync) {
-            while (!mActionDone) {
-                long delay = endTime - SystemClock.elapsedRealtime();
-                if (delay <= 0) {
-                    Log.w(TAG, "Shutdown broadcast timed out");
-                    break;
-                }
-                try {
-                    mActionDoneSync.wait(delay);
-                } catch (InterruptedException e) {
-                }
-            }
-        }
-
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
         Log.i(TAG, "Shutting down activity manager...");
 
         final IActivityManager am =
@@ -408,13 +392,11 @@ public final class ShutdownThread extends Thread {
             }
         }
 
-        // Shutdown radios.
-        shutdownRadios(MAX_RADIO_WAIT_TIME);
-
         // Shutdown MountService to ensure media is in a safe state
         IMountShutdownObserver observer = new IMountShutdownObserver.Stub() {
             public void onShutDownComplete(int statusCode) throws RemoteException {
                 Log.w(TAG, "Result code " + statusCode + " from MountService.shutdown");
+                mMountServiceDone.set(true);
                 actionDone();
             }
         };
@@ -422,7 +404,6 @@ public final class ShutdownThread extends Thread {
         Log.i(TAG, "Shutting down MountService");
 
         // Set initial variables and time out time.
-        mActionDone = false;
         final long endShutTime = SystemClock.elapsedRealtime() + MAX_SHUTDOWN_WAIT_TIME;
         synchronized (mActionDoneSync) {
             try {
@@ -495,10 +476,28 @@ public final class ShutdownThread extends Thread {
                 }
 
                 try {
-                    radioOff = phone == null || !phone.isRadioOn();
-                    if (!radioOff) {
-                        Log.w(TAG, "Turning off radio...");
-                        phone.setRadio(false);
+                    radioOff = true;
+                    if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
+                        final ITelephonyMSim mphone = ITelephonyMSim.Stub.asInterface(
+                                ServiceManager.checkService("phone_msim"));
+                        if (mphone != null) {
+                            //radio off indication should be sent for both subscriptions
+                            //in case of DSDS.
+                            for (int i = 0; i < MSimTelephonyManager.getDefault().
+                                    getPhoneCount(); i++) {
+                                radioOff = radioOff && !mphone.isRadioOn(i);
+                                if (mphone.isRadioOn(i)) {
+                                    Log.w(TAG, "Turning off radio on Subscription :" + i);
+                                    mphone.setRadio(false, i);
+                                }
+                            }
+                        }
+                    } else {
+                        radioOff = phone == null || !phone.isRadioOn();
+                        if (!radioOff) {
+                            Log.w(TAG, "Turning off radio...");
+                            phone.setRadio(false);
+                        }
                     }
                 } catch (RemoteException ex) {
                     Log.e(TAG, "RemoteException during radio shutdown", ex);
@@ -521,7 +520,18 @@ public final class ShutdownThread extends Thread {
                     }
                     if (!radioOff) {
                         try {
-                            radioOff = !phone.isRadioOn();
+                            boolean subRadioOff = true;
+                            if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
+                                final ITelephonyMSim mphone = ITelephonyMSim.Stub.asInterface(
+                                        ServiceManager.checkService("phone_msim"));
+                                for (int i = 0; i < MSimTelephonyManager.getDefault().
+                                        getPhoneCount(); i++) {
+                                    subRadioOff = subRadioOff && !mphone.isRadioOn(i);
+                                }
+                                radioOff = subRadioOff;
+                            } else {
+                                radioOff = !phone.isRadioOn();
+                            }
                         } catch (RemoteException ex) {
                             Log.e(TAG, "RemoteException during radio shutdown", ex);
                             radioOff = true;
@@ -549,17 +559,14 @@ public final class ShutdownThread extends Thread {
                     }
                     SystemClock.sleep(PHONE_STATE_POLL_SLEEP_MSEC);
                 }
+                if (!done[0]) {
+                    Log.w(TAG, "Timed out waiting for NFC, Radio and Bluetooth shutdown.");
+                }
+                mModemDone.set(true);
+                actionDone();
             }
         };
-
         t.start();
-        try {
-            t.join(timeout);
-        } catch (InterruptedException ex) {
-        }
-        if (!done[0]) {
-            Log.w(TAG, "Timed out waiting for NFC, Radio and Bluetooth shutdown.");
-        }
     }
 
     /**
